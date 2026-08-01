@@ -1,4 +1,7 @@
-import { DIFFICULTIES, LANGUAGES, type Difficulty, type LanguageCode } from "@/lib/mock-data";
+import { SUPPORTED_LANGUAGES, type SupportedLanguage } from "@/ai/constants";
+
+export const DIFFICULTIES = ["Grade 5", "Grade 8", "Grade 10", "College", "Expert"] as const;
+export type Difficulty = (typeof DIFFICULTIES)[number];
 
 export function TopBar({
   language,
@@ -6,8 +9,8 @@ export function TopBar({
   difficulty,
   setDifficulty,
 }: {
-  language: LanguageCode;
-  setLanguage: (l: LanguageCode) => void;
+  language: SupportedLanguage;
+  setLanguage: (l: SupportedLanguage) => void;
   difficulty: Difficulty;
   setDifficulty: (d: Difficulty) => void;
 }) {
@@ -17,20 +20,20 @@ export function TopBar({
     <div className="glass flex flex-wrap items-center justify-between gap-6 rounded-3xl px-5 py-4">
       <div className="flex min-w-0 items-center gap-3">
         <span className="text-[10px] tracking-[0.16em] text-muted-foreground uppercase">
-          Language
+          Target Language
         </span>
         <div className="flex flex-wrap gap-1.5">
-          {LANGUAGES.map((l) => (
+          {SUPPORTED_LANGUAGES.map((lang) => (
             <button
-              key={l.code}
-              onClick={() => setLanguage(l.code)}
+              key={lang}
+              onClick={() => setLanguage(lang)}
               className={`rounded-full border px-3 py-1.5 text-[12px] transition-all duration-300 ${
-                language === l.code
-                  ? "border-primary/40 bg-primary/10 text-primary"
+                language === lang
+                  ? "border-primary/40 bg-primary/10 text-primary font-medium"
                   : "border-border text-muted-foreground hover:border-border-strong hover:text-foreground"
               }`}
             >
-              {l.label}
+              {lang}
             </button>
           ))}
         </div>
@@ -46,8 +49,8 @@ export function TopBar({
             min={0}
             max={DIFFICULTIES.length - 1}
             step={1}
-            value={index}
-            onChange={(e) => setDifficulty(DIFFICULTIES[Number(e.target.value)] ?? DIFFICULTIES[0])}
+            value={index >= 0 ? index : 2}
+            onChange={(e) => setDifficulty(DIFFICULTIES[Number(e.target.value)] ?? DIFFICULTIES[2])}
             aria-label="Explanation difficulty"
             className="h-1.5 w-full cursor-pointer appearance-none rounded-full outline-none [&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-foreground [&::-webkit-slider-thumb]:shadow-[0_0_0_4px_color-mix(in_oklab,var(--primary)_35%,transparent)] [&::-webkit-slider-thumb]:transition-transform hover:[&::-webkit-slider-thumb]:scale-110"
             style={{
@@ -62,7 +65,7 @@ export function TopBar({
                 key={d}
                 onClick={() => setDifficulty(d)}
                 className={`text-[10.5px] transition-colors duration-300 ${
-                  d === difficulty ? "text-foreground" : "text-muted-foreground hover:text-foreground/70"
+                  d === difficulty ? "text-foreground font-medium" : "text-muted-foreground hover:text-foreground/70"
                 }`}
               >
                 {d}

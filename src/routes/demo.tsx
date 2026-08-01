@@ -9,7 +9,9 @@ import { ExplanationPanel } from "@/components/demo/ExplanationPanel";
 import { CompanionPanel } from "@/components/demo/CompanionPanel";
 import { ControlBar } from "@/components/demo/ControlBar";
 import { ImLost } from "@/components/demo/ImLost";
-import type { Difficulty, LanguageCode } from "@/lib/mock-data";
+import type { SupportedLanguage } from "@/ai/constants";
+import type { Difficulty } from "@/lib/mock-data";
+
 
 export const Route = createFileRoute("/demo")({
   head: () => ({
@@ -31,9 +33,10 @@ export const Route = createFileRoute("/demo")({
 });
 
 function Demo() {
-  const [language, setLanguage] = useState<LanguageCode>("hi");
+  const [language, setLanguage] = useState<SupportedLanguage>("Hindi");
   const [difficulty, setDifficulty] = useState<Difficulty>("Grade 10");
   const [listening, setListening] = useState(true);
+
 
   return (
     <DictionaryProvider>

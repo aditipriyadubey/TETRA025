@@ -2,39 +2,21 @@
 //
 // EduBridge AI — Frontend / Backend Session Integration Hook
 //
-// Connects frontend interactive UI with Supabase Edge Functions and
-// database persistence:
+// Connects frontend interactive UI with Supabase Edge Functions:
 //   - Anonymous session creation & lifecycle
-//   - Real-time audio transcription (/stt-proxy + saveTranscriptChunk)
-//   - Language translation (/translate)
-//   - Technical term extraction (/terms + saveVocabularyTerm)
-//   - Incremental notes generation (/notes + saveNotes)
-//   - Context summary updates (/context-summary)
-//   - Dictionary lookup (/dictionary)
+//   - Real-time audio transcription (/stt-proxy)
+//   - Unified AI processing (/process → translation, notes, summary, glossary, keywords in ONE call)
 //   - "I'm Lost" rescue explanation (/im-lost)
-//   - Streamed Ask AI chat (/ask + saveChatMessage)
-//   - Session finish & quiz generation (/finish)
-//
-// OWNERSHIP:
-//   Developer 3 — Backend & Integration Layer.
-//   Preserves UI design system, handles API errors gracefully,
-//   and enforces persistence modes & audio privacy rules.
+//   - Streamed Ask AI chat (/ask) grounded in lecture context
 
 import { useState, useCallback, useRef } from "react";
 import {
   transcribeAudio,
-  translateText,
-  extractTerms,
-  generateNotes,
-  updateContextSummary,
-  lookupDictionary,
+  processTranscript,
   requestImLostExplanation,
   askAI,
-  finishSession,
   type ChatTurn,
-  type DictionaryResponse,
-  type FinishResponse,
-  type TechnicalTerm,
+  type GlossaryEntry,
 } from "./api";
 import {
   createSession,
@@ -52,7 +34,8 @@ export interface SessionState {
   translatedTranscript: string[];
   runningSummary: string;
   notes: string;
-  terms: TechnicalTerm[];
+  glossary: GlossaryEntry[];
+  keywords: string[];
   chatHistory: ChatTurn[];
   isProcessing: boolean;
   error: string | null;
@@ -65,14 +48,13 @@ export function useSessionBackend() {
   const [translatedTranscript, setTranslatedTranscript] = useState<string[]>([]);
   const [runningSummary, setRunningSummary] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
-  const [terms, setTerms] = useState<TechnicalTerm[]>([]);
+  const [glossary, setGlossary] = useState<GlossaryEntry[]>([]);
+  const [keywords, setKeywords] = useState<string[]>([]);
   const [chatHistory, setChatHistory] = useState<ChatTurn[]>([]);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   const chunkIndexRef = useRef<number>(0);
-  const frictionTermsRef = useRef<Set<string>>(new Set());
-  const frictionLostTimestampsRef = useRef<number[]>([]);
 
   /**
    * Start a new backend session.
@@ -92,11 +74,10 @@ export function useSessionBackend() {
         setTranslatedTranscript([]);
         setRunningSummary("");
         setNotes("");
-        setTerms([]);
+        setGlossary([]);
+        setKeywords([]);
         setChatHistory([]);
         chunkIndexRef.current = 0;
-        frictionTermsRef.current.clear();
-        frictionLostTimestampsRef.current = [];
         return res.data.session_id;
       } else {
         setError(res.error.message);
@@ -107,26 +88,39 @@ export function useSessionBackend() {
   );
 
   /**
-   * Process an audio chunk (Blob): transcribe, translate, extract terms, update notes & summary.
+   * Process an audio chunk (Blob):
+   * 1. Transcribe via Groq Whisper (/stt-proxy)
+   * 2. Execute ONE Gemini processing step (/process) returning:
+   *    - translation
+   *    - notes
+   *    - running summary
+   *    - glossary
+   *    - keywords
    */
   const processAudioChunk = useCallback(
-    async (audioBlob: Blob, targetLanguage: string = "English", difficulty: string = "Grade 10") => {
+    async (
+      audioBlob: Blob,
+      targetLanguage: string = "English",
+      difficulty: string = "Grade 10",
+    ) => {
       if (!audioBlob || audioBlob.size === 0) return;
       setIsProcessing(true);
       setError(null);
 
-      // 1. Transcribe audio
+      // 1. Transcribe audio using Groq Whisper
       const sttRes = await transcribeAudio(audioBlob);
       if (!sttRes.ok) {
-        // Fall back gracefully if AI/STT is not yet implemented on backend
         setIsProcessing(false);
-        if (sttRes.error.code !== "STT_NOT_IMPLEMENTED") {
-          setError(sttRes.error.error);
-        }
+        setError(sttRes.error.error);
         return;
       }
 
       const newText = sttRes.data.text;
+      if (!newText.trim()) {
+        setIsProcessing(false);
+        return;
+      }
+
       const currentChunkIndex = chunkIndexRef.current++;
       setTranscript((prev) => [...prev, newText]);
 
@@ -135,57 +129,78 @@ export function useSessionBackend() {
         currentSessionId = await startSession(persistenceMode, targetLanguage);
       }
 
-      // Persist transcript chunk if session exists
-      if (currentSessionId) {
-        await saveTranscriptChunk({
-          sessionId: currentSessionId,
-          chunkIndex: currentChunkIndex,
-          text: newText,
-          mode: persistenceMode,
-        });
-      }
+      // 2. Single AI Processing Call via Gemini
+      const procRes = await processTranscript(
+        newText,
+        targetLanguage,
+        runningSummary,
+        notes,
+        difficulty,
+      );
 
-      // 2. Translate text if target language is not English
-      if (targetLanguage.toLowerCase() !== "english") {
-        const transRes = await translateText(newText, targetLanguage);
-        if (transRes.ok) {
-          setTranslatedTranscript((prev) => [...prev, transRes.data.translated_text]);
-        }
-      }
+      if (procRes.ok) {
+        const { translated_text, notes: newNotes, summary, glossary: newGlossary, keywords: newKeywords } = procRes.data;
 
-      // 3. Extract technical terms
-      const termsRes = await extractTerms(newText);
-      if (termsRes.ok && termsRes.data.terms.length > 0) {
-        setTerms((prev) => [...prev, ...termsRes.data.terms]);
+        // Update translated transcript
+        const translatedLine = translated_text || newText;
+        setTranslatedTranscript((prev) => [...prev, translatedLine]);
+
+        // Save transcript chunk to DB
         if (currentSessionId) {
-          for (const t of termsRes.data.terms) {
-            await saveVocabularyTerm({
+          await saveTranscriptChunk({
+            sessionId: currentSessionId,
+            chunkIndex: currentChunkIndex,
+            text: newText,
+            translatedText: translatedLine,
+            mode: persistenceMode,
+          });
+        }
+
+        // Update running summary
+        if (summary) {
+          setRunningSummary(summary);
+        }
+
+        // Update notes
+        if (newNotes) {
+          setNotes((prev) => (prev ? `${prev}\n${newNotes}` : newNotes));
+          if (currentSessionId) {
+            await saveNotes({
               sessionId: currentSessionId,
-              term: t.term,
+              contentMarkdown: notes ? `${notes}\n${newNotes}` : newNotes,
               mode: persistenceMode,
             });
           }
         }
-      }
 
-      // 4. Update running summary
-      const summaryRes = await updateContextSummary(runningSummary, newText);
-      if (summaryRes.ok) {
-        setRunningSummary(summaryRes.data.running_summary);
-      }
-
-      // 5. Generate notes delta
-      if (currentSessionId) {
-        const notesRes = await generateNotes(currentSessionId, newText, notes, difficulty);
-        if (notesRes.ok) {
-          const updatedNotes = notes ? `${notes}\n${notesRes.data.notes_delta}` : notesRes.data.notes_delta;
-          setNotes(updatedNotes);
-          await saveNotes({
-            sessionId: currentSessionId,
-            contentMarkdown: updatedNotes,
-            mode: persistenceMode,
+        // Update glossary
+        if (newGlossary && newGlossary.length > 0) {
+          setGlossary((prev) => {
+            const existingTerms = new Set(prev.map((g) => g.term.toLowerCase()));
+            const uniqueNew = newGlossary.filter((g) => !existingTerms.has(g.term.toLowerCase()));
+            return [...prev, ...uniqueNew];
           });
+
+          if (currentSessionId) {
+            for (const item of newGlossary) {
+              await saveVocabularyTerm({
+                sessionId: currentSessionId,
+                term: item.term,
+                definition: item.definition,
+                analogy: item.simple_explanation,
+                mode: persistenceMode,
+              });
+            }
+          }
         }
+
+        // Update keywords
+        if (newKeywords && newKeywords.length > 0) {
+          setKeywords((prev) => Array.from(new Set([...prev, ...newKeywords])));
+        }
+      } else {
+        // Fallback for translation if process failed
+        setTranslatedTranscript((prev) => [...prev, newText]);
       }
 
       setIsProcessing(false);
@@ -194,7 +209,67 @@ export function useSessionBackend() {
   );
 
   /**
-   * Send a question to Ask AI and stream the response.
+   * Directly process a raw text segment (for lecture text uploads)
+   */
+  const processTextSegment = useCallback(
+    async (
+      text: string,
+      targetLanguage: string = "English",
+      difficulty: string = "Grade 10",
+    ) => {
+      if (!text.trim()) return;
+      setIsProcessing(true);
+      setError(null);
+
+      const currentChunkIndex = chunkIndexRef.current++;
+      setTranscript((prev) => [...prev, text]);
+
+      let currentSessionId = sessionId;
+      if (!currentSessionId) {
+        currentSessionId = await startSession(persistenceMode, targetLanguage);
+      }
+
+      const procRes = await processTranscript(
+        text,
+        targetLanguage,
+        runningSummary,
+        notes,
+        difficulty,
+      );
+
+      if (procRes.ok) {
+        const { translated_text, notes: newNotes, summary, glossary: newGlossary, keywords: newKeywords } = procRes.data;
+        const translatedLine = translated_text || text;
+        setTranslatedTranscript((prev) => [...prev, translatedLine]);
+
+        if (summary) setRunningSummary(summary);
+
+        if (newNotes) {
+          setNotes((prev) => (prev ? `${prev}\n${newNotes}` : newNotes));
+        }
+
+        if (newGlossary && newGlossary.length > 0) {
+          setGlossary((prev) => {
+            const existingTerms = new Set(prev.map((g) => g.term.toLowerCase()));
+            const uniqueNew = newGlossary.filter((g) => !existingTerms.has(g.term.toLowerCase()));
+            return [...prev, ...uniqueNew];
+          });
+        }
+
+        if (newKeywords && newKeywords.length > 0) {
+          setKeywords((prev) => Array.from(new Set([...prev, ...newKeywords])));
+        }
+      } else {
+        setTranslatedTranscript((prev) => [...prev, text]);
+      }
+
+      setIsProcessing(false);
+    },
+    [sessionId, persistenceMode, runningSummary, notes, startSession],
+  );
+
+  /**
+   * Send a question to Ask AI and stream the lecture-grounded response.
    */
   const sendAskQuestion = useCallback(
     async (
@@ -211,7 +286,6 @@ export function useSessionBackend() {
       ];
       setChatHistory(updatedHistory);
 
-      // Persist user question
       await saveChatMessage({
         sessionId: activeSessionId,
         role: "user",
@@ -220,18 +294,22 @@ export function useSessionBackend() {
       });
 
       const rollingBuffer = transcript.slice(-5).join(" ");
+      const glossaryString = glossary.map((g) => `${g.term}: ${g.definition}`).join("\n");
+      const keywordsString = keywords.join(", ");
+
       const askRes = await askAI(
         activeSessionId,
         question,
         runningSummary,
         rollingBuffer,
         chatHistory,
+        notes,
+        glossaryString,
+        keywordsString,
       );
 
       if (!askRes.ok) {
-        if (askRes.error.code !== "AI_NOT_IMPLEMENTED") {
-          setError(askRes.error.error);
-        }
+        setError(askRes.error.error);
         return null;
       }
 
@@ -253,7 +331,6 @@ export function useSessionBackend() {
       ];
       setChatHistory(finalHistory);
 
-      // Persist assistant response
       await saveChatMessage({
         sessionId: activeSessionId,
         role: "assistant",
@@ -263,7 +340,7 @@ export function useSessionBackend() {
 
       return fullAnswer;
     },
-    [sessionId, chatHistory, runningSummary, transcript, persistenceMode],
+    [sessionId, chatHistory, runningSummary, transcript, notes, glossary, keywords, persistenceMode],
   );
 
   /**
@@ -272,77 +349,18 @@ export function useSessionBackend() {
   const handleImLost = useCallback(
     async (currentDifficulty: string): Promise<string | null> => {
       setError(null);
-      frictionLostTimestampsRef.current.push(Date.now());
       const rollingBuffer = transcript.slice(-5).join(" ");
 
       const res = await requestImLostExplanation(rollingBuffer, currentDifficulty);
       if (res.ok) {
         return res.data.explanation;
       } else {
-        if (res.error.code !== "AI_NOT_IMPLEMENTED") {
-          setError(res.error.error);
-        }
+        setError(res.error.error);
         return null;
       }
     },
     [transcript],
   );
-
-  /**
-   * Lookup dictionary term definition.
-   */
-  const handleDictionaryLookup = useCallback(
-    async (
-      term: string,
-      sentenceContext: string,
-      difficulty: string,
-      targetLanguage: string,
-    ): Promise<DictionaryResponse | null> => {
-      setError(null);
-      frictionTermsRef.current.add(term);
-
-      const res = await lookupDictionary(term, sentenceContext, difficulty, targetLanguage);
-      if (res.ok) {
-        return res.data;
-      } else {
-        if (res.error.code !== "AI_NOT_IMPLEMENTED") {
-          setError(res.error.error);
-        }
-        return null;
-      }
-    },
-    [],
-  );
-
-  /**
-   * Complete session and fetch summary + personalized quiz.
-   */
-  const handleFinishSession = useCallback(async (): Promise<FinishResponse | null> => {
-    if (!sessionId) return null;
-    setError(null);
-
-    const fullTranscriptText = transcript.join("\n");
-    const frictionPoints = {
-      dictionary_terms_clicked: Array.from(frictionTermsRef.current),
-      im_lost_timestamps: frictionLostTimestampsRef.current,
-    };
-
-    const res = await finishSession(
-      sessionId,
-      fullTranscriptText,
-      runningSummary,
-      frictionPoints,
-    );
-
-    if (res.ok) {
-      return res.data;
-    } else {
-      if (res.error.code !== "AI_NOT_IMPLEMENTED") {
-        setError(res.error.error);
-      }
-      return null;
-    }
-  }, [sessionId, transcript, runningSummary]);
 
   return {
     sessionId,
@@ -351,15 +369,15 @@ export function useSessionBackend() {
     translatedTranscript,
     runningSummary,
     notes,
-    terms,
+    glossary,
+    keywords,
     chatHistory,
     isProcessing,
     error,
     startSession,
     processAudioChunk,
+    processTextSegment,
     sendAskQuestion,
     handleImLost,
-    handleDictionaryLookup,
-    handleFinishSession,
   };
 }

@@ -136,8 +136,9 @@ export async function updateSession(
   },
 ): Promise<DbResult<DbSession>> {
   const patch: Record<string, unknown> = {};
-  if (updates.persistenceMode) patch.persistence_mode = updates.persistenceMode;
-  if (updates.language !== undefined) patch.language = updates.language;
+  if (updates.persistenceMode) patch["persistence_mode"] = updates.persistenceMode;
+  if (updates.language !== undefined) patch["language"] = updates.language;
+
 
   const { data, error } = await supabase
     .from("sessions")
