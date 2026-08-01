@@ -43,8 +43,11 @@ export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: ApiError 
 
 // ─── Helper ──────────────────────────────────────────────────────
 
-const SUPABASE_URL = import.meta.env["VITE_SUPABASE_URL"] as string;
-const SUPABASE_ANON_KEY = import.meta.env["VITE_SUPABASE_ANON_KEY"] as string;
+// Strip trailing slash to prevent double-slash in URL construction
+// e.g. "https://xxx.supabase.co/" + "/functions/v1/..." → "https://xxx.supabase.co//functions/v1/..."
+const RAW_URL = (import.meta.env["VITE_SUPABASE_URL"] as string) ?? "";
+const SUPABASE_URL = RAW_URL.replace(/\/+$/, "");
+const SUPABASE_ANON_KEY = (import.meta.env["VITE_SUPABASE_ANON_KEY"] as string) ?? "";
 
 
 async function invokeFunction<T>(

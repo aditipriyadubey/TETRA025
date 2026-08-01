@@ -1,10 +1,9 @@
 // supabase/functions/stt-proxy/index.ts
 //
-// EduBridge AI — Speech-to-Text Proxy Edge Function (Scaffold)
+// EduBridge AI — Speech-to-Text Proxy Edge Function
 //
 // Accepts a browser-recorded audio chunk (multipart/form-data),
-// validates it, and will forward it to the AI Engineer's Groq
-// Whisper integration point.
+// validates it, and forwards it to Groq Whisper for transcription.
 //
 // PRIVACY — NON-NEGOTIABLE:
 //   Audio exists ONLY in memory for the duration of this request.
@@ -14,31 +13,18 @@
 
 // ─── Response Types ──────────────────────────────────────────────
 
-/**
- * Successful STT response — contract from Section 9.3.
- *
- * {
- *   text:      string   — transcribed text from the audio chunk
- *   chunk_id:  string   — server-generated UUID for this chunk
- *   timestamp: number   — server processing timestamp in ms (Date.now())
- * }
- */
 interface SttSuccessResponse {
   text: string;
   chunk_id: string;
   timestamp: number;
 }
 
-/**
- * Consistent error response shape used by all error paths.
- */
 interface SttErrorResponse {
   error: string;
   code: string;
 }
 
 // ─── CORS Configuration ─────────────────────────────────────────
-// Allows browser-based clients to call this Edge Function directly.
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -47,7 +33,6 @@ const CORS_HEADERS: Record<string, string> = {
     "Content-Type, Authorization, x-client-info, apikey",
 };
 
-/** Build a JSON response with CORS headers attached. */
 function jsonResponse(
   status: number,
   body: SttSuccessResponse | SttErrorResponse,
@@ -61,6 +46,30 @@ function jsonResponse(
   });
 }
 
+// ─── MIME → Extension Map ────────────────────────────────────────
+// Groq Whisper requires a filename with a recognized audio extension.
+// Without it, the API cannot determine the format and returns an error.
+
+function getExtensionForMime(mime: string): string {
+  const map: Record<string, string> = {
+    "audio/webm": ".webm",
+    "audio/ogg": ".ogg",
+    "audio/mp4": ".mp4",
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/flac": ".flac",
+    "audio/x-m4a": ".m4a",
+    "audio/m4a": ".m4a",
+    "video/webm": ".webm",
+    "video/mp4": ".mp4",
+  };
+  // Strip codec params: "audio/webm; codecs=opus" → "audio/webm"
+  const base = mime.split(";")[0]?.trim().toLowerCase() ?? "";
+  return map[base] ?? ".webm"; // Default to .webm (browser MediaRecorder default)
+}
+
 // ─── Request Handler ─────────────────────────────────────────────
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -69,7 +78,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
 
-  // ── 2. Method guard — POST only ──────────────────────────────
+  // ── 2. Method guard ──────────────────────────────────────────
   if (req.method !== "POST") {
     return jsonResponse(405, {
       error: "Method not allowed. Use POST.",
@@ -77,7 +86,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     });
   }
 
-  // ── 3. Content-Type guard — multipart/form-data ──────────────
+  // ── 3. Content-Type guard ────────────────────────────────────
   const contentType = req.headers.get("content-type") ?? "";
   if (!contentType.includes("multipart/form-data")) {
     return jsonResponse(400, {
@@ -127,73 +136,56 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const chunkId = crypto.randomUUID();
   const timestamp = Date.now();
 
-  // ════════════════════════════════════════════════════════════════
-  //
-  //  AI ENGINEER INTEGRATION POINT:
-  //
-  //  Forward the in-memory `audio` File to Groq Whisper here.
-  //
-  //  The `audio` variable is a standard Web API File object
-  //  containing the browser-recorded chunk (typically WebM/Opus,
-  //  3–5 seconds from MediaRecorder).
-  //
-  //  Available variables:
-  //    audio     — File object (in memory only)
-  //    chunkId   — pre-generated UUID for this chunk
-  //    timestamp — server timestamp in milliseconds
-  //
-  //  Expected usage:
-  //
-  //    const groqApiKey = Deno.env.get("GROQ_API_KEY");
-  //    if (!groqApiKey) {
-  //      return jsonResponse(500, {
-  //        error: "GROQ_API_KEY is not configured.",
-  //        code: "MISSING_API_KEY",
-  //      });
-  //    }
-  //
-  //    const transcribedText = await callGroqWhisper(audio, groqApiKey);
-  //
-  //    return jsonResponse(200, {
-  //      text: transcribedText,
-  //      chunk_id: chunkId,
-  //      timestamp,
-  //    } satisfies SttSuccessResponse);
-  //
-  //  PRIVACY RULES — NON-NEGOTIABLE:
-  //    • Do NOT persist or log the audio.
-  //    • Do NOT write audio to database, storage, or disk.
-  //    • Do NOT include audio content in error messages.
-  //    • The audio File is automatically garbage-collected
-  //      when this request handler returns.
-  //
-  // ════════════════════════════════════════════════════════════════
+  // ── 9. Get API key ───────────────────────────────────────────
+  const groqApiKey = Deno.env.get("GROQ_API_KEY");
 
-const groqApiKey = Deno.env.get("GROQ_API_KEY");
+  if (!groqApiKey) {
+    return jsonResponse(500, {
+      error: "GROQ_API_KEY is not configured.",
+      code: "MISSING_API_KEY",
+    });
+  }
 
-if (!groqApiKey) {
-  return jsonResponse(500, {
-    error: "GROQ_API_KEY is not configured.",
-    code: "MISSING_API_KEY",
-  });
-}
+  // ── 10. Call Groq Whisper (with full error handling) ──────────
+  try {
+    const transcribedText = await callGroqWhisper(audio, groqApiKey);
 
-const transcribedText = await callGroqWhisper(audio, groqApiKey);
+    return jsonResponse(200, {
+      text: transcribedText,
+      chunk_id: chunkId,
+      timestamp,
+    } satisfies SttSuccessResponse);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown STT error";
+    console.error("stt-proxy error:", message);
 
-return jsonResponse(200, {
-  text: transcribedText,
-  chunk_id: chunkId,
-  timestamp,
-} satisfies SttSuccessResponse);
-
+    return jsonResponse(500, {
+      error: message,
+      code: "STT_ERROR",
+    });
+  }
 });
+
+// ─── Groq Whisper Integration ────────────────────────────────────
+
 async function callGroqWhisper(
   audio: File,
   apiKey: string,
 ): Promise<string> {
-  const formData = new FormData();
+  // FIX: Groq Whisper requires a filename with a recognized audio extension.
+  // Browser MediaRecorder sends blobs with name "blob" (no extension).
+  // Without a proper extension, Groq cannot determine the audio format
+  // and returns 400 or 500.
+  const mime = audio.type || "audio/webm";
+  const ext = getExtensionForMime(mime);
+  const fileName = `recording${ext}`;
 
-  formData.append("file", audio);
+  // Read the raw bytes and create a new File with the correct name + type
+  const audioBytes = await audio.arrayBuffer();
+  const namedFile = new File([audioBytes], fileName, { type: mime });
+
+  const formData = new FormData();
+  formData.append("file", namedFile, fileName);
   formData.append("model", "whisper-large-v3-turbo");
   formData.append("response_format", "json");
 
@@ -209,10 +201,13 @@ async function callGroqWhisper(
   );
 
   if (!response.ok) {
-    throw new Error("Groq Whisper transcription failed.");
+    const errorText = await response.text();
+    console.error("Groq Whisper error response:", response.status, errorText);
+    throw new Error(
+      `Groq Whisper ${response.status}: ${errorText.slice(0, 300)}`,
+    );
   }
 
   const data = await response.json();
-
   return data.text ?? "";
 }
