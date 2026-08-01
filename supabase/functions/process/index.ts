@@ -27,7 +27,7 @@ import {
   requireString,
   requireEnvSecret,
 } from "../_shared/cors.ts";
-import { callGemini } from "../_shared/ollama.ts";
+import { callGemini } from "../_shared/gemini.ts";
 
 // ─── Request / Response Types ────────────────────────────────────
 
@@ -192,7 +192,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       : "college";
 
   // ── 6. Get API key ────────────────────────────────────────
-  const keyResult = requireEnvSecret("AI_INFERENCE_API_HOST");
+  const keyResult = requireEnvSecret("GEMINI_API_KEY");
   if ("error" in keyResult) return keyResult.error;
 
   // ── 7. Build prompt and call Gemini ────────────────────────

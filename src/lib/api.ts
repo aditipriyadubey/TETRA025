@@ -1,19 +1,18 @@
 // src/lib/api.ts
 //
-// EduBridge AI — API Wrappers for Supabase Edge Functions with Hybrid Local/Cloud Fallbacks
+// EduBridge AI — API Wrappers with Native Local Ollama & Groq Whisper Fallbacks
 //
 // PIPELINE ARCHITECTURE:
-//   1. POST /stt-proxy    — Groq Whisper speech-to-text (with direct Groq API fallback)
-//   2. POST /process      — Unified AI Processing (with direct local Ollama fallback)
-//   3. POST /ask          — Lecture-grounded chat (with direct local Ollama streaming fallback)
-//   4. POST /im-lost      — Section-specific rescue (with direct local Ollama fallback)
+//   1. STT:     Groq Whisper STT (via /groq-api proxy)
+//   2. Process: Local Ollama (llama3.1 via /ollama-api proxy) for notes, Hindi/multilingual translation, glossary, keywords
+//   3. Rescue:  Local Ollama for "I'm Lost" step-down explanation
+//   4. Ask AI:  Local Ollama for streamed Q&A chat
 
 import { supabase } from "./supabaseClient";
 
 // ─── Difficulty Mapping ──────────────────────────────────────────
 
 type BackendDifficulty = "child" | "high_school" | "college" | "expert";
-
 type FrontendDifficulty = "Grade 5" | "Grade 8" | "Grade 10" | "College" | "Expert";
 
 const DIFFICULTY_MAP: Record<FrontendDifficulty, BackendDifficulty> = {
@@ -25,9 +24,7 @@ const DIFFICULTY_MAP: Record<FrontendDifficulty, BackendDifficulty> = {
 };
 
 export function mapDifficulty(frontendDifficulty: string): BackendDifficulty {
-  return (
-    DIFFICULTY_MAP[frontendDifficulty as FrontendDifficulty] ?? "college"
-  );
+  return DIFFICULTY_MAP[frontendDifficulty as FrontendDifficulty] ?? "college";
 }
 
 // ─── Shared Types ────────────────────────────────────────────────
@@ -39,13 +36,18 @@ export interface ApiError {
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: ApiError };
 
-// ─── Environment & Fallbacks ──────────────────────────────────────
+// ─── Environment & Proxies ────────────────────────────────────────
 
 const RAW_URL = (import.meta.env["VITE_SUPABASE_URL"] as string) ?? "";
 const SUPABASE_URL = RAW_URL.replace(/\/+$/, "");
 const SUPABASE_ANON_KEY = (import.meta.env["VITE_SUPABASE_ANON_KEY"] as string) ?? "";
-const GROQ_API_KEY = (import.meta.env["GROQ_API_KEY"] as string) ?? "";
-const OLLAMA_HOST = "http://localhost:11434";
+const GROQ_API_KEY =
+  (import.meta.env["GROQ_API_KEY"] as string) ||
+  (import.meta.env["VITE_GROQ_API_KEY"] as string) ||
+  "";
+
+const GROQ_BASE = "/groq-api";
+const OLLAMA_BASE = "/ollama-api";
 const OLLAMA_MODEL = "llama3.1";
 
 async function invokeFunction<T>(
@@ -70,7 +72,7 @@ async function invokeFunction<T>(
 }
 
 // ═════════════════════════════════════════════════════════════════
-//  1. POST /stt-proxy — Speech-to-Text
+//  1. Speech-to-Text (Groq Whisper)
 // ═════════════════════════════════════════════════════════════════
 
 export interface SttResponse {
@@ -80,59 +82,66 @@ export interface SttResponse {
 }
 
 /**
- * Send an audio chunk for speech-to-text transcription.
- * Tries Edge Function first, falls back directly to Groq Whisper API.
+ * Transcribe browser audio via Groq Whisper STT.
  */
 export async function transcribeAudio(
   audio: Blob,
 ): Promise<ApiResult<SttResponse>> {
-  const formData = new FormData();
-  formData.append("audio", audio);
-
-  // 1. Try Supabase Edge Function /stt-proxy
+  // 1. Try Supabase Edge Function
   try {
+    const formData = new FormData();
+    formData.append("audio", audio);
     const res = await fetch(`${SUPABASE_URL}/functions/v1/stt-proxy`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-      },
+      headers: { Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
       body: formData,
     });
-
     if (res.ok) {
       const json = await res.json();
       return { ok: true, data: json as SttResponse };
     }
   } catch {
-    // Edge function unavailable, fallback to direct Groq Whisper API
+    // Edge function unavailable, fallback to direct Groq Whisper
   }
 
-  // 2. Direct Groq Whisper API fallback if GROQ_API_KEY exists
+  // 2. Direct Groq Whisper via /groq-api proxy
   if (GROQ_API_KEY) {
     try {
       const mime = audio.type || "audio/webm";
-      const ext = mime.includes("mp4") ? ".mp4" : ".webm";
+      const ext = mime.includes("mp4") ? ".mp4" : mime.includes("ogg") ? ".ogg" : ".webm";
       const namedFile = new File([audio], `recording${ext}`, { type: mime });
 
-      const groqFormData = new FormData();
-      groqFormData.append("file", namedFile);
-      groqFormData.append("model", "whisper-large-v3-turbo");
-      groqFormData.append("response_format", "json");
+      const groqForm = new FormData();
+      groqForm.append("file", namedFile, `recording${ext}`);
+      groqForm.append("model", "whisper-large-v3-turbo");
+      groqForm.append("response_format", "json");
 
-      const groqRes = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+      const groqRes = await fetch(`${GROQ_BASE}/openai/v1/audio/transcriptions`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${GROQ_API_KEY}`,
-        },
-        body: groqFormData,
+        headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
+        body: groqForm,
       });
 
       if (groqRes.ok) {
         const groqJson = await groqRes.json();
+        const rawText = (groqJson.text ?? "").trim();
+        
+        // Filter out empty or single punctuation noise (e.g. ".")
+        if (!rawText || rawText === "." || rawText === "...") {
+          return {
+            ok: true,
+            data: {
+              text: "",
+              chunk_id: crypto.randomUUID(),
+              timestamp: Date.now(),
+            },
+          };
+        }
+
         return {
           ok: true,
           data: {
-            text: groqJson.text ?? "",
+            text: rawText,
             chunk_id: crypto.randomUUID(),
             timestamp: Date.now(),
           },
@@ -141,25 +150,19 @@ export async function transcribeAudio(
     } catch (err) {
       return {
         ok: false,
-        error: {
-          error: err instanceof Error ? err.message : "Direct Groq error",
-          code: "GROQ_ERROR",
-        },
+        error: { error: err instanceof Error ? err.message : "STT error", code: "STT_ERROR" },
       };
     }
   }
 
   return {
     ok: false,
-    error: {
-      error: "STT service unavailable. Check Groq API key.",
-      code: "STT_UNAVAILABLE",
-    },
+    error: { error: "STT unavailable. Check GROQ_API_KEY in .env.local.", code: "STT_UNAVAILABLE" },
   };
 }
 
 // ═════════════════════════════════════════════════════════════════
-//  2. POST /process — Unified AI Processing
+//  2. Unified AI Processing (Local Ollama llama3.1)
 // ═════════════════════════════════════════════════════════════════
 
 export interface GlossaryEntry {
@@ -176,9 +179,6 @@ export interface ProcessResponse {
   keywords: string[];
 }
 
-/**
- * Process a transcript chunk through local Ollama or Gemini Edge Function.
- */
 export async function processTranscript(
   transcript: string,
   targetLanguage: string,
@@ -186,7 +186,7 @@ export async function processTranscript(
   existingNotes: string,
   difficulty: string,
 ): Promise<ApiResult<ProcessResponse>> {
-  // 1. Try Supabase Edge Function /process
+  // 1. Try Edge Function
   const edgeRes = await invokeFunction<ProcessResponse>("process", {
     transcript,
     target_language: targetLanguage,
@@ -194,75 +194,83 @@ export async function processTranscript(
     existing_notes: existingNotes,
     difficulty: mapDifficulty(difficulty),
   });
+  if (edgeRes.ok && edgeRes.data.translated_text) return edgeRes;
 
-  if (edgeRes.ok) return edgeRes;
-
-  // 2. Direct Local Ollama Fallback (http://localhost:11434)
+  // 2. Direct Local Ollama via /ollama-api proxy
   try {
-    const prompt = `You are an educational AI assistant processing a lecture transcript chunk.
+    const isHindi = targetLanguage.toLowerCase() === "hindi";
+    const languageInstruction = isHindi
+      ? "IMPORTANT: You MUST translate 'translated_text' into fluent Hindi using Devanagari script (e.g., 'यह मशीन लर्निंग का पाठ है'). Do not return English for translated_text when target language is Hindi!"
+      : `Translate 'translated_text' into ${targetLanguage}.`;
+
+    const prompt = `You are EduBridge AI, an educational companion processing a lecture chunk.
 Transcript: "${transcript}"
 Target Language: ${targetLanguage}
-Difficulty: ${difficulty}
-Existing Summary: "${existingSummary}"
+Difficulty Level: ${difficulty}
+${languageInstruction}
 
-Return ONLY valid JSON with keys:
-- "translated_text": string
-- "notes": bullet point string
-- "summary": string
-- "glossary": array of { "term": string, "definition": string, "simple_explanation": string }
-- "keywords": array of string keywords`;
+Return ONLY valid JSON (no markdown, no codeblocks) with these keys:
+{
+  "translated_text": "${targetLanguage} translation of the transcript",
+  "notes": "Key structured bullet points for this chunk",
+  "summary": "Updated 1-2 sentence running lecture summary",
+  "glossary": [{"term": "Technical Term", "definition": "Formal definition", "simple_explanation": "Simple real-world analogy"}],
+  "keywords": ["keyword1", "keyword2"]
+}`;
 
-    const ollamaRes = await fetch(`${OLLAMA_HOST}/api/generate`, {
+    const ollamaRes = await fetch(`${OLLAMA_BASE}/api/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: OLLAMA_MODEL,
         prompt,
         stream: false,
+        format: "json",
       }),
     });
 
     if (ollamaRes.ok) {
       const json = await ollamaRes.json();
-      const rawText = json.response ?? "";
-      const braceStart = rawText.indexOf("{");
-      const braceEnd = rawText.lastIndexOf("}");
-      
+      const rawText = (json.response ?? "").trim();
+
       let parsedData: Partial<ProcessResponse> = {};
-      if (braceStart !== -1 && braceEnd > braceStart) {
-        try {
-          parsedData = JSON.parse(rawText.slice(braceStart, braceEnd + 1));
-        } catch {
-          // fallback
+      try {
+        parsedData = JSON.parse(rawText);
+      } catch {
+        const bStart = rawText.indexOf("{");
+        const bEnd = rawText.lastIndexOf("}");
+        if (bStart !== -1 && bEnd > bStart) {
+          try {
+            parsedData = JSON.parse(rawText.slice(bStart, bEnd + 1));
+          } catch {
+            // fallback
+          }
         }
       }
 
       return {
         ok: true,
         data: {
-          translated_text: parsedData.translated_text ?? transcript,
-          notes: parsedData.notes ?? `- ${transcript}`,
-          summary: parsedData.summary ?? transcript,
-          glossary: parsedData.glossary ?? [],
-          keywords: parsedData.keywords ?? [],
+          translated_text: parsedData.translated_text || transcript,
+          notes: parsedData.notes || `- ${transcript}`,
+          summary: parsedData.summary || transcript,
+          glossary: Array.isArray(parsedData.glossary) ? parsedData.glossary : [],
+          keywords: Array.isArray(parsedData.keywords) ? parsedData.keywords : [],
         },
       };
     }
-  } catch {
-    // Local Ollama unavailable
+  } catch (err) {
+    console.error("[Process] Local Ollama error:", err);
   }
 
   return {
     ok: false,
-    error: {
-      error: "AI processing unavailable. Check local Ollama or Edge Function.",
-      code: "PROCESS_UNAVAILABLE",
-    },
+    error: { error: "Local AI processing unavailable.", code: "PROCESS_UNAVAILABLE" },
   };
 }
 
 // ═════════════════════════════════════════════════════════════════
-//  3. POST /im-lost — "I'm Lost" Rescue
+//  3. "I'm Lost" Rescue
 // ═════════════════════════════════════════════════════════════════
 
 export interface ImLostResponse {
@@ -277,13 +285,15 @@ export async function requestImLostExplanation(
     rolling_buffer: rollingBuffer,
     current_difficulty: mapDifficulty(currentDifficulty),
   });
+  if (edgeRes.ok && edgeRes.data.explanation) return edgeRes;
 
-  if (edgeRes.ok) return edgeRes;
-
-  // Direct Local Ollama Fallback
+  // Local Ollama fallback
   try {
-    const prompt = `A student clicked "I'm Lost". Explain this lecture transcript section simply: "${rollingBuffer}"`;
-    const ollamaRes = await fetch(`${OLLAMA_HOST}/api/generate`, {
+    const prompt = `A student got lost during a lecture section: "${rollingBuffer}".
+Target Difficulty: ${currentDifficulty}.
+Explain this section in simple terms with a real-life analogy so the student can immediately catch up.`;
+
+    const ollamaRes = await fetch(`${OLLAMA_BASE}/api/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -295,26 +305,26 @@ export async function requestImLostExplanation(
 
     if (ollamaRes.ok) {
       const json = await ollamaRes.json();
+      const explanation = (json.response ?? "").trim();
       return {
         ok: true,
-        data: { explanation: json.response ?? "Simple explanation of recent content." },
+        data: {
+          explanation: explanation || "Here is a quick rescue breakdown of the recent lecture section.",
+        },
       };
     }
-  } catch {
-    // fallback
+  } catch (err) {
+    console.error("[ImLost] Local Ollama error:", err);
   }
 
   return {
     ok: false,
-    error: {
-      error: "I'm Lost explanation unavailable.",
-      code: "RESCUE_UNAVAILABLE",
-    },
+    error: { error: "Rescue explanation unavailable.", code: "RESCUE_UNAVAILABLE" },
   };
 }
 
 // ═════════════════════════════════════════════════════════════════
-//  4. POST /ask — Ask AI (Streamed)
+//  4. Ask AI (Streamed)
 // ═════════════════════════════════════════════════════════════════
 
 export interface ChatTurn {
@@ -336,7 +346,7 @@ export async function askAI(
   glossary: string = "",
   keywords: string = "",
 ): Promise<AskAIResult> {
-  // 1. Try Supabase Edge Function /ask
+  // 1. Try Edge Function
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/ask`, {
       method: "POST",
@@ -355,18 +365,15 @@ export async function askAI(
         keywords,
       }),
     });
-
-    if (res.ok && res.body) {
-      return { ok: true, stream: res.body };
-    }
+    if (res.ok && res.body) return { ok: true, stream: res.body };
   } catch {
-    // Edge function unavailable
+    // fallback
   }
 
-  // 2. Direct Local Ollama Streaming Fallback
+  // 2. Local Ollama streaming fallback
   try {
     const prompt = `You are EduBridge AI answering a student's question based on lecture context: "${rollingBuffer}". Question: "${question}"`;
-    const ollamaRes = await fetch(`${OLLAMA_HOST}/api/generate`, {
+    const ollamaRes = await fetch(`${OLLAMA_BASE}/api/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
