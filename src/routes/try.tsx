@@ -8,18 +8,12 @@ import {
   MicOff,
   FileVideo,
   Radio,
-  Settings2,
   Brain,
   Layers,
   NotebookPen,
   MessageCircleQuestion,
   BookMarked,
-  Server,
-  Key,
-  Database,
   X,
-  CheckCircle2,
-  AlertCircle,
   Pause,
   Play,
   Square,
@@ -64,13 +58,7 @@ function TryNow() {
   const [mode, setMode] = useState<InputMode>("idle");
   const [language, setLanguage] = useState<LanguageCode>("en");
   const [difficulty, setDifficulty] = useState<Difficulty>("Grade 10");
-  const [configOpen, setConfigOpen] = useState(false);
 
-  /* API configuration state */
-  const [apiEndpoint, setApiEndpoint] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [datasetSource, setDatasetSource] = useState("");
-  const [modelName, setModelName] = useState("");
 
   /* Upload state */
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -88,7 +76,6 @@ function TryNow() {
   const [saveFileName, setSaveFileName] = useState("");
   const pendingBlobRef = useRef<Blob | null>(null);
 
-  const hasConfig = apiEndpoint.trim().length > 0;
 
   /* ── Recording helpers ─────────────────────────────────────────────────── */
 
@@ -211,19 +198,6 @@ function TryNow() {
           </div>
 
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => setConfigOpen(!configOpen)}
-              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[12px] transition-all duration-300 ${
-                configOpen
-                  ? "border-primary/40 bg-primary/10 text-primary"
-                  : hasConfig
-                    ? "border-emerald/40 bg-emerald/10 text-emerald"
-                    : "border-border text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Settings2 className="size-3.5" />
-              {hasConfig ? "Configured" : "API Config"}
-            </button>
             <span className="hidden items-center gap-2 font-mono text-[10.5px] tracking-widest text-muted-foreground uppercase sm:flex">
               <span className={`size-1.5 rounded-full ${
                 recordingState === "recording" ? "bg-destructive" :
@@ -236,73 +210,6 @@ function TryNow() {
             </span>
           </div>
         </header>
-
-        {/* ── API Configuration Panel ────────────────────────────────── */}
-        {configOpen && (
-          <div className="animate-rise glass rounded-3xl p-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Settings2 className="size-4 text-primary" />
-                <h3 className="text-[14px] font-medium">Backend Configuration</h3>
-              </div>
-              <button
-                onClick={() => setConfigOpen(false)}
-                className="rounded-full p-1.5 text-muted-foreground transition-colors hover:text-foreground"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
-            <p className="mt-2 text-[12px] text-muted-foreground">
-              Connect your own API, model and dataset to power transcription and AI explanations.
-            </p>
-
-            <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <ConfigField
-                icon={<Server className="size-4" />}
-                label="API Endpoint"
-                placeholder="https://your-api.example.com/v1"
-                value={apiEndpoint}
-                onChange={setApiEndpoint}
-              />
-              <ConfigField
-                icon={<Key className="size-4" />}
-                label="API Key"
-                placeholder="sk-..."
-                value={apiKey}
-                onChange={setApiKey}
-                type="password"
-              />
-              <ConfigField
-                icon={<Brain className="size-4" />}
-                label="Model Name"
-                placeholder="e.g. whisper-large-v3, gpt-4o"
-                value={modelName}
-                onChange={setModelName}
-              />
-              <ConfigField
-                icon={<Database className="size-4" />}
-                label="Dataset Source"
-                placeholder="e.g. PostgreSQL URI, S3 bucket"
-                value={datasetSource}
-                onChange={setDatasetSource}
-              />
-            </div>
-
-            <div className="mt-4 flex items-center gap-2">
-              {hasConfig ? (
-                <span className="inline-flex items-center gap-1.5 text-[11px] text-emerald">
-                  <CheckCircle2 className="size-3.5" />
-                  Endpoint configured — ready to connect
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <AlertCircle className="size-3.5" />
-                  Enter an API endpoint to enable processing
-                </span>
-              )}
-            </div>
-          </div>
-        )}
 
         {/* ── TopBar (language / difficulty) ──────────────────────────── */}
         <TopBar
@@ -354,10 +261,10 @@ function TryNow() {
                   }
                   hint={
                     isLiveSession
-                      ? hasConfig ? "Listening — sending audio to API" : "Recording — configure API to enable live transcription"
-                      : hasConfig ? "Endpoint configured — tap mic to start" : "Configure an API endpoint to begin"
+                      ? "Recording — awaiting backend for live transcription"
+                      : "Tap the mic to start recording"
                   }
-                  status={isLiveSession ? "live" : hasConfig ? "ready" : "waiting"}
+                  status={isLiveSession ? "live" : "waiting"}
                 />
               </div>
               <div className="h-[520px]">
@@ -367,14 +274,14 @@ function TryNow() {
                   description={`Adaptive explanations in ${language.toUpperCase()} at ${difficulty} level will render here as the lecture progresses.`}
                   hint={
                     isLiveSession
-                      ? hasConfig ? "Processing — generating explanations" : "Recording — connect a model to generate explanations"
-                      : hasConfig ? "Model connected — start recording" : "Connect a language model to power explanations"
+                      ? "Recording — awaiting model for explanations"
+                      : "Start recording to generate explanations"
                   }
-                  status={isLiveSession ? "live" : hasConfig ? "ready" : "waiting"}
+                  status={isLiveSession ? "live" : "waiting"}
                 />
               </div>
               <div className="h-[520px]">
-                <CompanionPlaceholder hasConfig={hasConfig} isLive={isLiveSession} />
+                <CompanionPlaceholder isLive={isLiveSession} />
               </div>
             </div>
 
@@ -426,8 +333,8 @@ function TryNow() {
                   icon={<Mic className="size-5" />}
                   title="Transcript"
                   description="Transcribed text will appear here once connected to a speech-to-text API."
-                  hint={hasConfig ? "Endpoint configured — awaiting processing" : "Configure an API endpoint to begin"}
-                  status={hasConfig ? "ready" : "waiting"}
+                  hint="Awaiting backend processing"
+                  status="waiting"
                 />
               </div>
               <div className="h-[520px]">
@@ -435,12 +342,12 @@ function TryNow() {
                   icon={<Brain className="size-5" />}
                   title="AI Explanation"
                   description={`Adaptive explanations in ${language.toUpperCase()} at ${difficulty} level will render here.`}
-                  hint={hasConfig ? "Model connected — send transcript to generate" : "Connect a language model to power explanations"}
-                  status={hasConfig ? "ready" : "waiting"}
+                  hint="Awaiting model for explanations"
+                  status="waiting"
                 />
               </div>
               <div className="h-[520px]">
-                <CompanionPlaceholder hasConfig={hasConfig} isLive={false} />
+                <CompanionPlaceholder isLive={false} />
               </div>
             </div>
           </>
@@ -803,7 +710,7 @@ function EmptyPanel({
 
 /* ── Companion Placeholder ───────────────────────────────────────────────── */
 
-function CompanionPlaceholder({ hasConfig, isLive }: { hasConfig: boolean; isLive: boolean }) {
+function CompanionPlaceholder({ isLive }: { isLive: boolean }) {
   const TABS = [
     { id: "ask", label: "Ask AI", icon: MessageCircleQuestion },
     { id: "notes", label: "Notes", icon: NotebookPen },
@@ -858,10 +765,10 @@ function CompanionPlaceholder({ hasConfig, isLive }: { hasConfig: boolean; isLiv
           description={meta.desc}
           hint={
             isLive
-              ? hasConfig ? "Live — processing data" : "Recording — connect backend to see results"
-              : hasConfig ? "Backend connected — awaiting data" : "Connect a backend to enable this feature"
+              ? "Recording — awaiting backend data"
+              : "Awaiting input to enable this feature"
           }
-          status={isLive ? "live" : hasConfig ? "ready" : "waiting"}
+          status={isLive ? "live" : "waiting"}
         />
       </div>
     </div>
