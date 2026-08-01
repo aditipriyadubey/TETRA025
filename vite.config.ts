@@ -5,6 +5,22 @@ import tsconfigPaths from "vite-tsconfig-paths";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 
 export default defineConfig({
+  envPrefix: ["VITE_", "GROQ_", "GEMINI_", "AI_"],
+  server: {
+    proxy: {
+      "/ollama-api": {
+        target: "http://localhost:11434",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ollama-api/, ""),
+      },
+      "/groq-api": {
+        target: "https://api.groq.com",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/groq-api/, ""),
+        secure: true,
+      },
+    },
+  },
   plugins: [
     tsconfigPaths(),
     tailwindcss(),
