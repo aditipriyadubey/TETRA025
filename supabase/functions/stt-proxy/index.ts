@@ -169,14 +169,50 @@ Deno.serve(async (req: Request): Promise<Response> => {
   //
   // ════════════════════════════════════════════════════════════════
 
-  // Development placeholder — remove once Groq integration is live.
-  void audio; // Explicitly acknowledge the variable to avoid lint warnings.
+const groqApiKey = Deno.env.get("GROQ_API_KEY");
 
-  return jsonResponse(501, {
-    error:
-      "Speech-to-text integration is not yet implemented. " +
-      "The AI Engineer must connect Groq Whisper at the marked " +
-      "integration point in supabase/functions/stt-proxy/index.ts.",
-    code: "STT_NOT_IMPLEMENTED",
+if (!groqApiKey) {
+  return jsonResponse(500, {
+    error: "GROQ_API_KEY is not configured.",
+    code: "MISSING_API_KEY",
   });
+}
+
+const transcribedText = await callGroqWhisper(audio, groqApiKey);
+
+return jsonResponse(200, {
+  text: transcribedText,
+  chunk_id: chunkId,
+  timestamp,
+} satisfies SttSuccessResponse);
+
 });
+async function callGroqWhisper(
+  audio: File,
+  apiKey: string,
+): Promise<string> {
+  const formData = new FormData();
+
+  formData.append("file", audio);
+  formData.append("model", "whisper-large-v3-turbo");
+  formData.append("response_format", "json");
+
+  const response = await fetch(
+    "https://api.groq.com/openai/v1/audio/transcriptions",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: formData,
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Groq Whisper transcription failed.");
+  }
+
+  const data = await response.json();
+
+  return data.text ?? "";
+}
