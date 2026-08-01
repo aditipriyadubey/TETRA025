@@ -238,10 +238,10 @@ function CTA() {
           </p>
           <div className="mt-9 flex justify-center">
             <Link
-              to="/demo"
+              to="/try"
               className="group inline-flex items-center gap-2 rounded-full bg-foreground px-7 py-3.5 text-sm font-medium text-background transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_22px_48px_-18px_oklch(1_0_0/0.55)]"
             >
-              Start Demo
+              Try Now
               <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
             </Link>
           </div>

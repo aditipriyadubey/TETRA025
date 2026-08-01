@@ -32,10 +32,10 @@ export function Nav() {
         </div>
 
         <Link
-          to="/demo"
+          to="/try"
           className="rounded-full bg-foreground px-4 py-2 text-[13px] font-medium text-background transition-all duration-300 hover:opacity-90 hover:shadow-[0_14px_34px_-16px_oklch(1_0_0/0.6)]"
         >
-          Start Demo
+          Try Now
         </Link>
       </nav>
     </header>
