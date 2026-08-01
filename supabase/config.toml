@@ -16,3 +16,34 @@ major_version = 15
 [studio]
 enabled = true
 port = 54323
+
+# ─── Anonymous Edge Function Invocation ─────────────────────────────
+# EduBridge AI is an anonymous session-based application (no user login).
+# `verify_jwt = false` allows anon-key requests to invoke functions.
+
+[functions.stt-proxy]
+verify_jwt = false
+
+[functions.translate]
+verify_jwt = false
+
+[functions.terms]
+verify_jwt = false
+
+[functions.notes]
+verify_jwt = false
+
+[functions.context-summary]
+verify_jwt = false
+
+[functions.dictionary]
+verify_jwt = false
+
+[functions.im-lost]
+verify_jwt = false
+
+[functions.ask]
+verify_jwt = false
+
+[functions.finish]
+verify_jwt = false
