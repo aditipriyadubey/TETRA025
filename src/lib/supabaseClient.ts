@@ -12,7 +12,10 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = import.meta.env["VITE_SUPABASE_URL"] as string | undefined;
+// Strip trailing slash to prevent double-slash in SDK-constructed URLs
+// e.g. supabase.functions.invoke() builds: `${url}/functions/v1/${name}`
+const rawUrl = import.meta.env["VITE_SUPABASE_URL"] as string | undefined;
+const supabaseUrl = rawUrl?.replace(/\/+$/, "");
 const supabaseAnonKey = import.meta.env["VITE_SUPABASE_ANON_KEY"] as string | undefined;
 
 

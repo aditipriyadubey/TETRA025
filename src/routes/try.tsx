@@ -67,19 +67,40 @@ function TryNow() {
   /* AI Session Hook */
   const session = useSessionBackend();
 
-  /* Recording loop & chunking (sends audio chunk every 5 seconds) */
+  /* Recording loop & chunking (sends valid audio chunk every 5 seconds) */
   const startRecording = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
-      const mr = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      const types = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/mp4",
+        "audio/ogg;codecs=opus",
+      ];
+      let selectedMime = "";
+      for (const t of types) {
+        if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) {
+          selectedMime = t;
+          break;
+        }
+      }
+
+      const mr = new MediaRecorder(
+        stream,
+        selectedMime ? { mimeType: selectedMime } : undefined,
+      );
       mediaRecorderRef.current = mr;
 
+      let headerBlob: Blob | null = null;
       let chunkBlobs: Blob[] = [];
 
       mr.ondataavailable = (e) => {
-        if (e.data.size > 0) {
+        if (e.data && e.data.size > 0) {
+          if (!headerBlob) {
+            headerBlob = e.data;
+          }
           chunkBlobs.push(e.data);
         }
       };
@@ -87,13 +108,24 @@ function TryNow() {
       // Interval to send chunk to Groq Whisper STT & Gemini /process
       const sendChunk = async () => {
         if (chunkBlobs.length > 0) {
-          const chunkToSend = new Blob(chunkBlobs, { type: "audio/webm" });
+          // Prepend initial container header blob if missing to form valid WebM container
+          const payloadBlobs =
+            headerBlob && chunkBlobs[0] !== headerBlob
+              ? [headerBlob, ...chunkBlobs]
+              : chunkBlobs;
+
+          const currentMime = mr.mimeType || selectedMime || "audio/webm";
+          const chunkToSend = new Blob(payloadBlobs, { type: currentMime });
           chunkBlobs = [];
-          await session.processAudioChunk(chunkToSend, language, difficulty);
+
+          // Only transmit if size > 1KB to avoid 0-byte or corrupt header-only slices
+          if (chunkToSend.size > 1000) {
+            await session.processAudioChunk(chunkToSend, language, difficulty);
+          }
         }
       };
 
-      mr.start(1000); // collect data every second
+      mr.start(1000); // collect data slice every second
       const intervalId = window.setInterval(sendChunk, 5000);
 
       setRecordingState("recording");
