@@ -43,8 +43,9 @@ export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: ApiError 
 
 // ─── Helper ──────────────────────────────────────────────────────
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+const SUPABASE_URL = import.meta.env["VITE_SUPABASE_URL"] as string;
+const SUPABASE_ANON_KEY = import.meta.env["VITE_SUPABASE_ANON_KEY"] as string;
+
 
 async function invokeFunction<T>(
   functionName: string,

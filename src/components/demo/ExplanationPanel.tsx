@@ -1,25 +1,36 @@
 import { Languages, Lightbulb, Sparkles } from "lucide-react";
+import type { SupportedLanguage } from "@/ai/constants";
+
 import {
   ANALOGIES,
   EXPLANATIONS,
-  LANGUAGES,
   type Difficulty,
   type LanguageCode,
 } from "@/lib/mock-data";
 import { useTypedText } from "@/components/kit";
+
+const LANG_CODE_MAP: Record<SupportedLanguage, LanguageCode> = {
+  English: "en",
+  Hindi: "hi",
+  Gujarati: "gu",
+  French: "en", // fallback for demo panel
+};
 
 export function ExplanationPanel({
   language,
   difficulty,
   live,
 }: {
-  language: LanguageCode;
+  language: SupportedLanguage;
   difficulty: Difficulty;
   live: boolean;
 }) {
-  const text = EXPLANATIONS[difficulty][language];
+  const langCode = LANG_CODE_MAP[language] || "en";
+  const text = EXPLANATIONS[difficulty][langCode];
+
   const typed = useTypedText(text, 12, live);
-  const lang = LANGUAGES.find((l) => l.code === language);
+  const langLabel = language;
+
 
   return (
     <div className="surface relative flex h-full flex-col overflow-hidden">
@@ -32,7 +43,7 @@ export function ExplanationPanel({
         </div>
         <div className="flex items-center gap-2 rounded-full border border-border bg-elevated px-3 py-1.5">
           <Languages className="size-3 text-muted-foreground" />
-          <span className="text-[11px] text-muted-foreground">{lang?.native}</span>
+          <span className="text-[11px] text-muted-foreground">{langLabel}</span>
           <span className="text-[11px] text-muted-foreground/40">·</span>
           <span className="text-[11px] text-primary">{difficulty}</span>
         </div>

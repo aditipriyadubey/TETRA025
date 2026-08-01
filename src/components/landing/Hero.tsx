@@ -127,19 +127,19 @@ export function Hero() {
           style={{ animationDelay: "240ms" }}
         >
           <Link
-            to="/demo"
+            to="/try"
             className="group inline-flex items-center gap-2 rounded-full bg-foreground px-6 py-3.5 text-sm font-medium text-background transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_20px_44px_-18px_oklch(1_0_0/0.55)]"
           >
-            Start Demo
+            Try Now
             <ArrowRight className="size-4 transition-transform duration-300 group-hover:translate-x-1" />
           </Link>
-          <a
-            href="#how"
+          <Link
+            to="/demo"
             className="inline-flex items-center gap-2 rounded-full border border-border-strong bg-card/50 px-6 py-3.5 text-sm font-medium backdrop-blur-xl transition-all duration-300 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-card"
           >
             <Play className="size-3.5 text-primary" />
-            Watch Flow
-          </a>
+            Watch Demo
+          </Link>
         </div>
 
         <div className="animate-rise mt-16 w-full" style={{ animationDelay: "320ms" }}>
