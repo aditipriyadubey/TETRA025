@@ -1,36 +1,11 @@
 // supabase/functions/_shared/ollama.ts
 //
-// EduBridge AI — Local Ollama Helper (drop-in replacement for gemini.ts)
+// EduBridge AI — Direct Native Local Ollama Helper (0 Docker Required)
 //
-// Uses Supabase Edge Runtime's BUILT-IN Supabase.ai.Session API, which
-// natively supports a self-managed Ollama server. No manual fetch/CORS
-// handling needed — the runtime does it for you.
-// Docs: https://supabase.com/docs/guides/functions/ai-models
-//
-// HOW THE SERVER ADDRESS IS RESOLVED:
-//   Supabase.ai.Session reads the `AI_INFERENCE_API_HOST` secret
-//   automatically. You do NOT pass a URL in code.
-//
-// LOCAL DEV SETUP:
-//   1. ollama pull llama3.1        (or mistral, gemma2, etc.)
-//   2. ollama serve                (usually already running in the background)
-//   3. Add AI_INFERENCE_API_HOST=http://host.docker.internal:11434 to .env.local
-//      -> On native Linux Docker, if host.docker.internal doesn't resolve,
-//         use your docker0 bridge IP instead (commonly http://172.17.0.1:11434).
-//   4. supabase functions serve --env-file .env.local
-//
-// PRODUCTION (only if you deploy your own Ollama/Llamafile server somewhere
-// publicly reachable — your laptop being asleep is not a production server):
-//   supabase secrets set AI_INFERENCE_API_HOST=https://your-ollama-host/
-//   supabase functions deploy
-//
-// IMPORTANT: this file only works when invoked inside a Supabase Edge
-// Function (Deno runtime with the `Supabase` global injected). It will not
-// run in a plain Node/browser context.
+// Connects directly to native Windows Ollama running on http://localhost:11434
+// Works in Deno, Node, and browser runtimes without requiring Docker.
 
-import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-
-// Must exactly match a model you've pulled locally (`ollama list` to check).
+const OLLAMA_HOST = "http://localhost:11434";
 const OLLAMA_MODEL = "llama3.1";
 
 interface OllamaOptions {
@@ -44,25 +19,34 @@ export async function callGemini(
   _unusedKey: string,
   options?: OllamaOptions,
 ): Promise<string> {
-  const session = new Supabase.ai.Session(OLLAMA_MODEL);
-
   const fullPrompt = options?.systemInstruction
     ? `${options.systemInstruction}\n\n${prompt}`
     : prompt;
 
-  const output = (await session.run(fullPrompt, {
-    stream: false,
-    timeout: 60,
-  })) as { response?: string };
+  const res = await fetch(`${OLLAMA_HOST}/api/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      prompt: fullPrompt,
+      stream: false,
+    }),
+  });
 
-  if (!output?.response) {
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
     throw new Error(
-      "Ollama returned no content. Is `ollama serve` running and is " +
-        `"${OLLAMA_MODEL}" pulled? Check AI_INFERENCE_API_HOST too.`,
+      `Ollama returned error (${res.status}): ${errText}. Is Ollama running on ${OLLAMA_HOST}?`,
     );
   }
 
-  return output.response;
+  const json = (await res.json()) as { response?: string };
+
+  if (!json.response) {
+    throw new Error(`Ollama returned no content for model "${OLLAMA_MODEL}".`);
+  }
+
+  return json.response;
 }
 
 export async function streamGemini(
@@ -70,29 +54,46 @@ export async function streamGemini(
   _unusedKey: string,
   options?: OllamaOptions,
 ): Promise<ReadableStream<Uint8Array>> {
-  const session = new Supabase.ai.Session(OLLAMA_MODEL);
-
   const fullPrompt = options?.systemInstruction
     ? `${options.systemInstruction}\n\n${prompt}`
     : prompt;
 
-  const output = (await session.run(fullPrompt, {
-    stream: true,
-  })) as AsyncIterable<{ response?: string }>;
+  const res = await fetch(`${OLLAMA_HOST}/api/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      prompt: fullPrompt,
+      stream: true,
+    }),
+  });
+
+  if (!res.ok || !res.body) {
+    throw new Error(
+      `Ollama streaming failed (${res.status}). Is Ollama running on ${OLLAMA_HOST}?`,
+    );
+  }
 
   const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
 
-  return new ReadableStream<Uint8Array>({
-    async start(controller) {
-      try {
-        for await (const chunk of output) {
-          if (chunk.response) controller.enqueue(encoder.encode(chunk.response));
+  const transformStream = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      const text = decoder.decode(chunk, { stream: true });
+      const lines = text.split("\n");
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const parsed = JSON.parse(line) as { response?: string };
+          if (parsed.response) {
+            controller.enqueue(encoder.encode(parsed.response));
+          }
+        } catch {
+          // skip incomplete JSON chunks
         }
-      } catch (err) {
-        console.error("Ollama stream error:", err);
-      } finally {
-        controller.close();
       }
     },
   });
+
+  return res.body.pipeThrough(transformStream);
 }
