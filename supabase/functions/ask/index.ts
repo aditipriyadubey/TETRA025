@@ -23,7 +23,7 @@ import {
   requireEnvSecret,
   streamResponse,
 } from "../_shared/cors.ts";
-import { streamGemini } from "../_shared/gemini.ts";
+import { streamGemini } from "../_shared/ollama.ts";
 import { isValidChatTurn, type ChatTurn } from "../_shared/types.ts";
 
 // ─── Error Response Helper ───────────────────────────────────────
@@ -108,7 +108,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const keywordsRaw = typeof body.keywords === "string" ? (body.keywords as string) : "";
 
   // ── 6. Get API key ────────────────────────────────────────
-  const keyResult = requireEnvSecret("GEMINI_API_KEY");
+  const keyResult = requireEnvSecret("AI_INFERENCE_API_HOST");
   if ("error" in keyResult) return keyResult.error;
 
   // ── 7. Build lecture-grounded prompt ───────────────────────

@@ -18,7 +18,7 @@ import {
   safeParseJson,
   requireEnvSecret,
 } from "../_shared/cors.ts";
-import { callGemini } from "../_shared/gemini.ts";
+import { callGemini } from "../_shared/ollama.ts";
 import {
   type DifficultyLevel,
   VALID_DIFFICULTIES,
@@ -69,7 +69,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const currentDifficulty = body.current_difficulty as DifficultyLevel;
 
   // ── 6. Get API key ────────────────────────────────────────
-  const keyResult = requireEnvSecret("GEMINI_API_KEY");
+  const keyResult = requireEnvSecret("AI_INFERENCE_API_HOST");
   if ("error" in keyResult) return keyResult.error;
 
   // ── 7. Step down difficulty ────────────────────────────────
