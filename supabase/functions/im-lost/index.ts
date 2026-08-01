@@ -1,109 +1,54 @@
 // supabase/functions/im-lost/index.ts
 //
-// EduBridge AI — "I'm Lost" Rescue Edge Function (Scaffold)
+// EduBridge AI — "I'm Lost" Rescue Edge Function
 //
-// Accepts the rolling transcript buffer and the student's current
-// difficulty level.  Returns a simplified explanation to help the
-// student catch up.
+// When a student clicks "I'm Lost", this function:
+//   1. Steps down the difficulty level (expert→college→high_school→child)
+//   2. Uses Gemini to explain ONLY the current lecture section
+//   3. Returns: simpler explanation + real-life analogy + practical example
 //
-// IMPORTANT (Section 5.5):
-//   The difficulty must eventually be auto-stepped-down SERVER-SIDE
-//   before generating the explanation.  This ensures the rescue
-//   explanation is always simpler than the student's current level.
-//   This logic belongs to the AI Engineer.
+// Designed to be FAST — short prompt, focused output.
 
-// ─── Shared Types ────────────────────────────────────────────────
-
-type Difficulty = "child" | "high_school" | "college" | "expert";
-
-// ─── Request / Response Types ────────────────────────────────────
-
-interface ImLostRequest {
-  rolling_buffer: string;
-  current_difficulty: Difficulty;
-}
-
-/** Successful response — Section 9.3 contract. */
-interface ImLostSuccessResponse {
-  explanation: string;
-}
-
-/** Consistent error response shape. */
-interface ImLostErrorResponse {
-  error: string;
-  code: string;
-}
-
-// ─── CORS Configuration ─────────────────────────────────────────
-
-const CORS_HEADERS: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers":
-    "Content-Type, Authorization, x-client-info, apikey",
-};
-
-function jsonResponse(
-  status: number,
-  body: ImLostSuccessResponse | ImLostErrorResponse,
-): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-  });
-}
-
-// ─── Validation Helpers ──────────────────────────────────────────
-
-const VALID_DIFFICULTIES: ReadonlySet<string> = new Set<Difficulty>([
-  "child",
-  "high_school",
-  "college",
-  "expert",
-]);
+import {
+  CORS_HEADERS,
+  corsPreflightResponse,
+  jsonResponse,
+  validateMethod,
+  validateJsonContentType,
+  safeParseJson,
+  requireEnvSecret,
+} from "../_shared/cors.ts";
+import { callGemini } from "../_shared/gemini.ts";
+import {
+  type DifficultyLevel,
+  VALID_DIFFICULTIES,
+  DIFFICULTY_STEP_DOWN,
+} from "../_shared/types.ts";
 
 // ─── Request Handler ─────────────────────────────────────────────
 
 Deno.serve(async (req: Request): Promise<Response> => {
   // ── 1. CORS preflight ──────────────────────────────────────
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: CORS_HEADERS });
+    return corsPreflightResponse();
   }
 
   // ── 2. Method guard ────────────────────────────────────────
-  if (req.method !== "POST") {
-    return jsonResponse(405, {
-      error: "Method not allowed. Use POST.",
-      code: "METHOD_NOT_ALLOWED",
-    });
-  }
+  const methodErr = validateMethod(req);
+  if (methodErr) return methodErr;
 
   // ── 3. Content-Type guard ──────────────────────────────────
-  const contentType = req.headers.get("content-type") ?? "";
-  if (!contentType.includes("application/json")) {
-    return jsonResponse(400, {
-      error: "Content-Type must be application/json.",
-      code: "INVALID_CONTENT_TYPE",
-    });
-  }
+  const ctErr = validateJsonContentType(req);
+  if (ctErr) return ctErr;
 
   // ── 4. Parse JSON body ─────────────────────────────────────
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch (_err) {
-    return jsonResponse(400, {
-      error: "Failed to parse JSON request body.",
-      code: "JSON_PARSE_ERROR",
-    });
-  }
-
-  const { rolling_buffer, current_difficulty } =
-    body as Record<string, unknown>;
+  const parsed = await safeParseJson(req);
+  if ("error" in parsed) return parsed.error;
+  const body = parsed.data;
 
   // ── 5. Validate required fields ────────────────────────────
 
-  if (typeof rolling_buffer !== "string") {
+  if (typeof body.rolling_buffer !== "string") {
     return jsonResponse(400, {
       error: 'Missing or invalid required field: "rolling_buffer".',
       code: "INVALID_ROLLING_BUFFER",
@@ -111,81 +56,70 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   if (
-    typeof current_difficulty !== "string" ||
-    !VALID_DIFFICULTIES.has(current_difficulty)
+    typeof body.current_difficulty !== "string" ||
+    !VALID_DIFFICULTIES.includes(body.current_difficulty as DifficultyLevel)
   ) {
     return jsonResponse(400, {
-      error: `"current_difficulty" must be one of: ${[...VALID_DIFFICULTIES].join(", ")}.`,
+      error: `"current_difficulty" must be one of: ${VALID_DIFFICULTIES.join(", ")}.`,
       code: "INVALID_DIFFICULTY",
     });
   }
 
-  // ── 6. Validated request ───────────────────────────────────
-  const validatedRequest: ImLostRequest = {
-    rolling_buffer: rolling_buffer as string,
-    current_difficulty: current_difficulty as Difficulty,
+  const rollingBuffer = body.rolling_buffer as string;
+  const currentDifficulty = body.current_difficulty as DifficultyLevel;
+
+  // ── 6. Get API key ────────────────────────────────────────
+  const keyResult = requireEnvSecret("GEMINI_API_KEY");
+  if ("error" in keyResult) return keyResult.error;
+
+  // ── 7. Step down difficulty ────────────────────────────────
+  const rescueDifficulty = DIFFICULTY_STEP_DOWN[currentDifficulty];
+
+  // ── 8. Build prompt and call Gemini ────────────────────────
+  const difficultyLabels: Record<DifficultyLevel, string> = {
+    child: "a 10-year-old child",
+    high_school: "a high school student",
+    college: "a college undergraduate",
+    expert: "a graduate-level expert",
   };
 
-  // ════════════════════════════════════════════════════════════════
-  //
-  //  AI ENGINEER INTEGRATION POINT:
-  //
-  //  Generate "I'm Lost" rescue explanation using Gemini here.
-  //
-  //  Available:
-  //    validatedRequest.rolling_buffer       — recent transcript text
-  //    validatedRequest.current_difficulty   — student's current level
-  //
-  //  IMPORTANT — Section 5.5 Difficulty Step-Down:
-  //    The difficulty must be AUTO-STEPPED-DOWN server-side before
-  //    generating the explanation.  For example:
-  //      expert       → college
-  //      college      → high_school
-  //      high_school  → child
-  //      child        → child  (already at lowest)
-  //
-  //    This ensures the rescue explanation is always simpler than
-  //    the student's current level.  Implement this mapping here
-  //    before calling Gemini.
-  //
-  //  Expected usage:
-  //
-  //    const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
-  //    if (!geminiApiKey) {
-  //      return jsonResponse(500, {
-  //        error: "GEMINI_API_KEY is not configured.",
-  //        code: "MISSING_API_KEY",
-  //      });
-  //    }
-  //
-  //    const steppedDownDifficulty = stepDownDifficulty(
-  //      validatedRequest.current_difficulty
-  //    );
-  //
-  //    const explanation = await generateRescueExplanation(
-  //      validatedRequest.rolling_buffer,
-  //      steppedDownDifficulty,
-  //      geminiApiKey,
-  //    );
-  //
-  //    return jsonResponse(200, {
-  //      explanation,
-  //    } satisfies ImLostSuccessResponse);
-  //
-  //  IMPORTANT:
-  //    • Do NOT expose the API key in responses or logs.
-  //    • Do NOT write to the database from this function.
-  //
-  // ════════════════════════════════════════════════════════════════
+  const prompt = `You are EduBridge AI. A student just clicked "I'm Lost" during a lecture.
 
-  void validatedRequest;
+Here is the most recent section of the lecture transcript they are struggling with:
 
-  return jsonResponse(501, {
-    error:
-      "I'm Lost rescue is not yet implemented. " +
-      "The AI Engineer must connect Gemini (with Section 5.5 " +
-      "difficulty step-down) at the marked integration point " +
-      "in supabase/functions/im-lost/index.ts.",
-    code: "AI_NOT_IMPLEMENTED",
-  });
+"${rollingBuffer}"
+
+The student needs a rescue explanation at the level of ${difficultyLabels[rescueDifficulty]}.
+
+Return your response in EXACTLY this format (plain text, not JSON):
+
+**Simpler Explanation:**
+[Explain what was just discussed in simpler terms. 2-3 sentences max. Only cover what's in the transcript above — do NOT explain the entire lecture.]
+
+**Real-Life Analogy:**
+[One concrete, relatable real-life analogy that makes the concept click.]
+
+**Practical Example:**
+[One specific practical example showing how this concept works in the real world.]
+
+RULES:
+- Keep it SHORT and FAST. Students are lost — don't overwhelm them.
+- Only explain what's in the transcript — not the whole lecture.
+- Use language appropriate for ${difficultyLabels[rescueDifficulty]}.
+- Be warm and encouraging.`;
+
+  try {
+    const explanation = await callGemini(prompt, keyResult.key, {
+      temperature: 0.4,
+      maxOutputTokens: 1024,
+    });
+
+    return jsonResponse(200, { explanation });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown AI error";
+    return jsonResponse(500, {
+      error: `I'm Lost AI failed: ${message}`,
+      code: "AI_ERROR",
+    });
+  }
 });

@@ -1,35 +1,21 @@
 // src/lib/api.ts
 //
-// EduBridge AI — Typed API Wrappers for Supabase Edge Functions
+// EduBridge AI — API Wrappers for Supabase Edge Functions
 //
-// Each function corresponds to exactly one Edge Function endpoint.
-// These wrappers handle:
-//   - request typing
-//   - response typing
-//   - difficulty mapping (frontend labels → backend enum)
-//   - Supabase function invocation or raw fetch
-//   - error normalisation
+// NEW PIPELINE ARCHITECTURE:
+//   1. POST /stt-proxy    — Groq Whisper speech-to-text (multipart)
+//   2. POST /process      — ONE Gemini call → structured JSON
+//   3. POST /ask          — Lecture-grounded chat (streamed)
+//   4. POST /im-lost      — Section-specific rescue explanation
 //
-// OWNERSHIP:
-//   Developer 3 owns this file.
-//   This file depends on HTTP contracts, NOT on AI prompt logic.
-//   Do NOT import from src/ai/*.
+// This replaces the old 9-endpoint API-wrapper pattern.
 
 import { supabase } from "./supabaseClient";
 
 // ─── Difficulty Mapping ──────────────────────────────────────────
-//
-// Frontend uses display labels: "Grade 5", "Grade 8", "Grade 10", "College", "Expert"
-// Edge Functions use enum values: "child", "high_school", "college", "expert"
 
-/**
- * Backend difficulty enum — matches Edge Function validation.
- */
 type BackendDifficulty = "child" | "high_school" | "college" | "expert";
 
-/**
- * Frontend difficulty labels — matches mock-data.ts `Difficulty` type.
- */
 type FrontendDifficulty = "Grade 5" | "Grade 8" | "Grade 10" | "College" | "Expert";
 
 const DIFFICULTY_MAP: Record<FrontendDifficulty, BackendDifficulty> = {
@@ -40,10 +26,6 @@ const DIFFICULTY_MAP: Record<FrontendDifficulty, BackendDifficulty> = {
   Expert: "expert",
 };
 
-/**
- * Map a frontend difficulty label to the backend enum value.
- * Falls back to "college" for unknown values.
- */
 export function mapDifficulty(frontendDifficulty: string): BackendDifficulty {
   return (
     DIFFICULTY_MAP[frontendDifficulty as FrontendDifficulty] ?? "college"
@@ -52,13 +34,11 @@ export function mapDifficulty(frontendDifficulty: string): BackendDifficulty {
 
 // ─── Shared Types ────────────────────────────────────────────────
 
-/** Consistent error shape returned by all Edge Functions. */
 export interface ApiError {
   error: string;
   code: string;
 }
 
-/** Wrapper result — either success data or an error. */
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: ApiError };
 
 // ─── Helper ──────────────────────────────────────────────────────
@@ -66,10 +46,6 @@ export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: ApiError 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
-/**
- * Invoke a JSON Edge Function via the Supabase client.
- * Handles the `{ data, error }` response and normalises it.
- */
 async function invokeFunction<T>(
   functionName: string,
   body: Record<string, unknown>,
@@ -79,7 +55,6 @@ async function invokeFunction<T>(
   });
 
   if (error) {
-    // Supabase client wraps HTTP errors
     return {
       ok: false,
       error: {
@@ -105,9 +80,6 @@ export interface SttResponse {
 /**
  * Send an audio chunk for speech-to-text transcription.
  *
- * Uses raw fetch (not supabase.functions.invoke) because
- * /stt-proxy requires multipart/form-data with a File/Blob.
- *
  * PRIVACY: The audio Blob is sent in-memory only.
  * It is never persisted, logged, or cached by this function.
  */
@@ -123,7 +95,6 @@ export async function transcribeAudio(
       headers: {
         Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
       },
-      // Do NOT set Content-Type — browser sets it with multipart boundary
       body: formData,
     });
 
@@ -146,135 +117,47 @@ export async function transcribeAudio(
 }
 
 // ═════════════════════════════════════════════════════════════════
-//  2. POST /translate — Translation
+//  2. POST /process — Unified AI Processing (ONE Gemini call)
 // ═════════════════════════════════════════════════════════════════
 
-export interface TranslateResponse {
-  translated_text: string;
-}
-
-/**
- * Translate a transcript chunk into the target language.
- * Translation is difficulty-independent by design.
- */
-export async function translateText(
-  text: string,
-  targetLanguage: string,
-): Promise<ApiResult<TranslateResponse>> {
-  return invokeFunction<TranslateResponse>("translate", {
-    text,
-    target_language: targetLanguage,
-  });
-}
-
-// ═════════════════════════════════════════════════════════════════
-//  3. POST /terms — Technical Term Extraction
-// ═════════════════════════════════════════════════════════════════
-
-export interface TechnicalTerm {
+export interface GlossaryEntry {
   term: string;
-  start_index: number;
-  end_index: number;
+  definition: string;
+  simple_explanation: string;
 }
 
-export interface TermsResponse {
-  terms: TechnicalTerm[];
-}
-
-/**
- * Extract technical terms (with character positions) from a transcript chunk.
- */
-export async function extractTerms(
-  text: string,
-): Promise<ApiResult<TermsResponse>> {
-  return invokeFunction<TermsResponse>("terms", { text });
-}
-
-// ═════════════════════════════════════════════════════════════════
-//  4. POST /notes — Notes Generation
-// ═════════════════════════════════════════════════════════════════
-
-export interface NotesResponse {
-  notes_delta: string;
+export interface ProcessResponse {
+  translated_text: string;
+  notes: string;
+  summary: string;
+  glossary: GlossaryEntry[];
+  keywords: string[];
 }
 
 /**
- * Generate new note bullets from the latest transcript.
- * Returns ONLY the delta — client appends to existing notes.
+ * Process a transcript chunk through ONE Gemini call.
+ * Returns: translated text, notes, summary, glossary, keywords.
  *
- * @param difficulty - Frontend difficulty label (auto-mapped to backend enum)
+ * This is the CORE of the new pipeline — replaces 5 old endpoints.
  */
-export async function generateNotes(
-  sessionId: string,
-  newTranscript: string,
+export async function processTranscript(
+  transcript: string,
+  targetLanguage: string,
+  existingSummary: string,
   existingNotes: string,
   difficulty: string,
-): Promise<ApiResult<NotesResponse>> {
-  return invokeFunction<NotesResponse>("notes", {
-    session_id: sessionId,
-    new_transcript: newTranscript,
+): Promise<ApiResult<ProcessResponse>> {
+  return invokeFunction<ProcessResponse>("process", {
+    transcript,
+    target_language: targetLanguage,
+    existing_summary: existingSummary,
     existing_notes: existingNotes,
     difficulty: mapDifficulty(difficulty),
   });
 }
 
 // ═════════════════════════════════════════════════════════════════
-//  5. POST /context-summary — Running Summary Update
-// ═════════════════════════════════════════════════════════════════
-
-export interface ContextSummaryResponse {
-  running_summary: string;
-}
-
-/**
- * Fold new transcript content into the existing running summary.
- * Does NOT re-summarize from scratch — incremental only.
- *
- * @param existingSummary - May be empty string for the first cycle
- */
-export async function updateContextSummary(
-  existingSummary: string,
-  newTranscript: string,
-): Promise<ApiResult<ContextSummaryResponse>> {
-  return invokeFunction<ContextSummaryResponse>("context-summary", {
-    existing_summary: existingSummary,
-    new_transcript: newTranscript,
-  });
-}
-
-// ═════════════════════════════════════════════════════════════════
-//  6. POST /dictionary — Dictionary Lookup
-// ═════════════════════════════════════════════════════════════════
-
-export interface DictionaryResponse {
-  definition: string;
-  pronunciation_ipa: string;
-  translation: string;
-  simple_explanation: string;
-  analogy: string;
-}
-
-/**
- * Look up a technical term with context-aware definitions.
- *
- * @param difficulty - Frontend difficulty label (auto-mapped to backend enum)
- */
-export async function lookupDictionary(
-  term: string,
-  sentenceContext: string,
-  difficulty: string,
-  targetLanguage: string,
-): Promise<ApiResult<DictionaryResponse>> {
-  return invokeFunction<DictionaryResponse>("dictionary", {
-    term,
-    sentence_context: sentenceContext,
-    difficulty: mapDifficulty(difficulty),
-    target_language: targetLanguage,
-  });
-}
-
-// ═════════════════════════════════════════════════════════════════
-//  7. POST /im-lost — "I'm Lost" Rescue
+//  3. POST /im-lost — "I'm Lost" Rescue
 // ═════════════════════════════════════════════════════════════════
 
 export interface ImLostResponse {
@@ -283,9 +166,7 @@ export interface ImLostResponse {
 
 /**
  * Request a simplified rescue explanation for recent content.
- * Server-side difficulty step-down per Section 5.5.
- *
- * @param currentDifficulty - Frontend difficulty label (auto-mapped to backend enum)
+ * Server-side difficulty step-down is automatic.
  */
 export async function requestImLostExplanation(
   rollingBuffer: string,
@@ -298,49 +179,33 @@ export async function requestImLostExplanation(
 }
 
 // ═════════════════════════════════════════════════════════════════
-//  8. POST /ask — Ask AI (Streamed Response)
+//  4. POST /ask — Ask AI (Streamed, Lecture-Grounded)
 // ═════════════════════════════════════════════════════════════════
 
-/**
- * A single chat turn — matches Edge Function + database schema.
- * Note: frontend mock-data uses "ai" but the backend uses "assistant".
- */
 export interface ChatTurn {
   role: "user" | "assistant";
   content: string;
 }
 
-/**
- * Ask AI a question with full session context.
- *
- * Returns the raw Response object for streamed text consumption.
- * Uses raw fetch (not supabase.functions.invoke) because the
- * success response is STREAMED TEXT, not JSON.
- *
- * Usage:
- * ```ts
- * const res = await askAI(sessionId, question, summary, buffer, history);
- * if (!res.ok) { handleError(res.error); return; }
- *
- * const reader = res.stream.getReader();
- * const decoder = new TextDecoder();
- * while (true) {
- *   const { done, value } = await reader.read();
- *   if (done) break;
- *   appendToUI(decoder.decode(value, { stream: true }));
- * }
- * ```
- */
 export type AskAIResult =
   | { ok: true; stream: ReadableStream<Uint8Array> }
   | { ok: false; error: ApiError };
 
+/**
+ * Ask AI a question with full lecture context.
+ * Returns a ReadableStream for streamed text consumption.
+ *
+ * Now includes notes, glossary, and keywords for lecture grounding.
+ */
 export async function askAI(
   sessionId: string,
   question: string,
   runningSummary: string,
   rollingBuffer: string,
   chatHistory: ChatTurn[],
+  notes: string = "",
+  glossary: string = "",
+  keywords: string = "",
 ): Promise<AskAIResult> {
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/ask`, {
@@ -355,6 +220,9 @@ export async function askAI(
         running_summary: runningSummary,
         rolling_buffer: rollingBuffer,
         chat_history: chatHistory,
+        notes,
+        glossary,
+        keywords,
       }),
     });
 
@@ -383,51 +251,4 @@ export async function askAI(
       },
     };
   }
-}
-
-// ═════════════════════════════════════════════════════════════════
-//  9. POST /finish — Session Finish
-// ═════════════════════════════════════════════════════════════════
-
-export type QuizQuestion =
-  | {
-      type: "mcq";
-      question: string;
-      options: string[];
-      correct_answer: string;
-      explanation: string;
-    }
-  | {
-      type: "short_answer";
-      question: string;
-      correct_answer: string;
-      explanation: string;
-    };
-
-export interface FrictionPoints {
-  dictionary_terms_clicked: string[];
-  im_lost_timestamps: number[];
-}
-
-export interface FinishResponse {
-  summary: string;
-  quiz: QuizQuestion[];
-}
-
-/**
- * Complete the session and generate a summary + personalized quiz.
- * Quiz is 5–8 questions weighted toward friction points.
- */
-export async function finishSession(
-  sessionId: string,
-  fullTranscript: string,
-  runningSummary: string,
-  frictionPoints: FrictionPoints,
-): Promise<ApiResult<FinishResponse>> {
-  return invokeFunction<FinishResponse>("finish", {
-    session_id: sessionId,
-    full_transcript: fullTranscript,
-    running_summary: runningSummary,
-    friction_points: frictionPoints,
-  });
 }
