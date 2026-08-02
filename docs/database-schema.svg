@@ -1,0 +1,279 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 820" width="100%" height="100%" style="background-color: #0f172a; font-family: system-ui, -apple-system, sans-serif;">
+  <defs>
+    <!-- Shadow Filter -->
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+    
+    <!-- Marker for 1:N crow's foot / arrow -->
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#38bdf8" />
+    </marker>
+    
+    <marker id="circle" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6">
+      <circle cx="5" cy="5" r="3" fill="#0f172a" stroke="#38bdf8" stroke-width="2"/>
+    </marker>
+  </defs>
+
+  <!-- Title & Header -->
+  <text x="700" y="45" font-size="24" font-weight="700" fill="#f8fafc" text-anchor="middle">EduBridge AI — Database Schema Diagram</text>
+  <text x="700" y="72" font-size="13" fill="#94a3b8" text-anchor="middle">Supabase PostgreSQL 15 | Row Level Security (RLS) Enabled | Auto-generated UUID Primary Keys</text>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- TABLE: SESSIONS (Central Hub)               -->
+  <!-- ═══════════════════════════════════════════ -->
+  <g transform="translate(80, 240)" filter="url(#shadow)">
+    <!-- Header -->
+    <rect width="320" height="42" rx="8" ry="8" fill="#6366f1"/>
+    <rect y="34" width="320" height="8" fill="#6366f1"/>
+    <text x="160" y="26" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">sessions</text>
+    
+    <!-- Body -->
+    <rect y="42" width="320" height="210" fill="#1e293b" rx="0" ry="0"/>
+    <rect y="244" width="320" height="8" fill="#1e293b" rx="8" ry="8"/>
+    <rect y="42" width="320" height="210" fill="none" stroke="#4f46e5" stroke-width="2" rx="8" ry="8"/>
+
+    <!-- Row 1: PK -->
+    <rect y="42" width="320" height="42" fill="#334155" opacity="0.5"/>
+    <rect x="12" y="53" width="28" height="20" rx="4" fill="#f59e0b"/>
+    <text x="26" y="67" font-size="10" font-weight="800" fill="#0f172a" text-anchor="middle">PK</text>
+    <text x="50" y="68" font-size="13" font-weight="600" fill="#f8fafc">session_id</text>
+    <text x="306" y="68" font-size="11" font-weight="500" fill="#cbd5e1" text-anchor="end">UUID</text>
+
+    <!-- Row 2 -->
+    <line x1="0" y1="84" x2="320" y2="84" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="110" font-size="13" font-weight="500" fill="#e2e8f0">persistence_mode</text>
+    <text x="306" y="110" font-size="11" fill="#94a3b8" text-anchor="end">TEXT (NOT NULL)</text>
+
+    <!-- Row 3 -->
+    <line x1="0" y1="126" x2="320" y2="126" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="152" font-size="13" font-weight="500" fill="#e2e8f0">language</text>
+    <text x="306" y="152" font-size="11" fill="#94a3b8" text-anchor="end">TEXT (NOT NULL)</text>
+
+    <!-- Row 4 -->
+    <line x1="0" y1="168" x2="320" y2="168" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="194" font-size="13" font-weight="500" fill="#e2e8f0">consent_token</text>
+    <text x="306" y="194" font-size="11" fill="#64748b" text-anchor="end">TEXT (nullable)</text>
+
+    <!-- Row 5 -->
+    <line x1="0" y1="210" x2="320" y2="210" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="236" font-size="13" font-weight="500" fill="#e2e8f0">created_at</text>
+    <text x="306" y="236" font-size="11" fill="#94a3b8" text-anchor="end">TIMESTAMPTZ</text>
+  </g>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- TABLE: TRANSCRIPTS (Top Right)              -->
+  <!-- ═══════════════════════════════════════════ -->
+  <g transform="translate(560, 110)" filter="url(#shadow)">
+    <rect width="330" height="42" rx="8" ry="8" fill="#3b82f6"/>
+    <rect y="34" width="330" height="8" fill="#3b82f6"/>
+    <text x="165" y="26" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">transcripts</text>
+    
+    <rect y="42" width="330" height="252" fill="#1e293b"/>
+    <rect y="286" width="330" height="8" fill="#1e293b" rx="8" ry="8"/>
+    <rect y="42" width="330" height="252" fill="none" stroke="#2563eb" stroke-width="2" rx="8" ry="8"/>
+
+    <!-- Row 1: PK -->
+    <rect y="42" width="330" height="42" fill="#334155" opacity="0.5"/>
+    <rect x="12" y="53" width="28" height="20" rx="4" fill="#f59e0b"/>
+    <text x="26" y="67" font-size="10" font-weight="800" fill="#0f172a" text-anchor="middle">PK</text>
+    <text x="50" y="68" font-size="13" font-weight="600" fill="#f8fafc">id</text>
+    <text x="316" y="68" font-size="11" fill="#cbd5e1" text-anchor="end">UUID</text>
+
+    <!-- Row 2: FK -->
+    <line x1="0" y1="84" x2="330" y2="84" stroke="#334155" stroke-width="1"/>
+    <rect x="12" y="95" width="28" height="20" rx="4" fill="#38bdf8"/>
+    <text x="26" y="109" font-size="10" font-weight="800" fill="#0f172a" text-anchor="middle">FK</text>
+    <text x="50" y="110" font-size="13" font-weight="600" fill="#38bdf8">session_id</text>
+    <text x="316" y="110" font-size="11" fill="#94a3b8" text-anchor="end">UUID (NOT NULL)</text>
+
+    <!-- Row 3 -->
+    <line x1="0" y1="126" x2="330" y2="126" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="152" font-size="13" font-weight="500" fill="#e2e8f0">chunk_index</text>
+    <text x="316" y="152" font-size="11" fill="#94a3b8" text-anchor="end">INTEGER</text>
+
+    <!-- Row 4 -->
+    <line x1="0" y1="168" x2="330" y2="168" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="194" font-size="13" font-weight="500" fill="#e2e8f0">text</text>
+    <text x="316" y="194" font-size="11" fill="#94a3b8" text-anchor="end">TEXT (NOT NULL)</text>
+
+    <!-- Row 5 -->
+    <line x1="0" y1="210" x2="330" y2="210" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="236" font-size="13" font-weight="500" fill="#e2e8f0">translated_text</text>
+    <text x="316" y="236" font-size="11" fill="#64748b" text-anchor="end">TEXT (nullable)</text>
+
+    <!-- Row 6 -->
+    <line x1="0" y1="252" x2="330" y2="252" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="278" font-size="13" font-weight="500" fill="#e2e8f0">created_at</text>
+    <text x="316" y="278" font-size="11" fill="#94a3b8" text-anchor="end">TIMESTAMPTZ</text>
+  </g>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- TABLE: NOTES (Middle Right)                 -->
+  <!-- ═══════════════════════════════════════════ -->
+  <g transform="translate(560, 440)" filter="url(#shadow)">
+    <rect width="330" height="42" rx="8" ry="8" fill="#10b981"/>
+    <rect y="34" width="330" height="8" fill="#10b981"/>
+    <text x="165" y="26" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">notes</text>
+    
+    <rect y="42" width="330" height="126" fill="#1e293b"/>
+    <rect y="160" width="330" height="8" fill="#1e293b" rx="8" ry="8"/>
+    <rect y="42" width="330" height="126" fill="none" stroke="#059669" stroke-width="2" rx="8" ry="8"/>
+
+    <!-- Row 1: PK/FK -->
+    <rect y="42" width="330" height="42" fill="#334155" opacity="0.5"/>
+    <rect x="10" y="53" width="24" height="20" rx="4" fill="#f59e0b"/>
+    <text x="22" y="67" font-size="9" font-weight="800" fill="#0f172a" text-anchor="middle">PK</text>
+    <rect x="38" y="53" width="24" height="20" rx="4" fill="#38bdf8"/>
+    <text x="50" y="67" font-size="9" font-weight="800" fill="#0f172a" text-anchor="middle">FK</text>
+    <text x="70" y="68" font-size="13" font-weight="600" fill="#38bdf8">session_id</text>
+    <text x="316" y="68" font-size="11" fill="#cbd5e1" text-anchor="end">UUID</text>
+
+    <!-- Row 2 -->
+    <line x1="0" y1="84" x2="330" y2="84" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="110" font-size="13" font-weight="500" fill="#e2e8f0">content_markdown</text>
+    <text x="316" y="110" font-size="11" fill="#94a3b8" text-anchor="end">TEXT (NOT NULL)</text>
+
+    <!-- Row 3 -->
+    <line x1="0" y1="126" x2="330" y2="126" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="152" font-size="13" font-weight="500" fill="#e2e8f0">updated_at</text>
+    <text x="316" y="152" font-size="11" fill="#94a3b8" text-anchor="end">TIMESTAMPTZ</text>
+  </g>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- TABLE: VOCABULARY (Far Right)               -->
+  <!-- ═══════════════════════════════════════════ -->
+  <g transform="translate(980, 110)" filter="url(#shadow)">
+    <rect width="330" height="42" rx="8" ry="8" fill="#f59e0b"/>
+    <rect y="34" width="330" height="8" fill="#f59e0b"/>
+    <text x="165" y="26" font-size="16" font-weight="700" fill="#0f172a" text-anchor="middle">vocabulary</text>
+    
+    <rect y="42" width="330" height="294" fill="#1e293b"/>
+    <rect y="328" width="330" height="8" fill="#1e293b" rx="8" ry="8"/>
+    <rect y="42" width="330" height="294" fill="none" stroke="#d97706" stroke-width="2" rx="8" ry="8"/>
+
+    <!-- Row 1: PK -->
+    <rect y="42" width="330" height="42" fill="#334155" opacity="0.5"/>
+    <rect x="12" y="53" width="28" height="20" rx="4" fill="#f59e0b"/>
+    <text x="26" y="67" font-size="10" font-weight="800" fill="#0f172a" text-anchor="middle">PK</text>
+    <text x="50" y="68" font-size="13" font-weight="600" fill="#f8fafc">id</text>
+    <text x="316" y="68" font-size="11" fill="#cbd5e1" text-anchor="end">UUID</text>
+
+    <!-- Row 2: FK -->
+    <line x1="0" y1="84" x2="330" y2="84" stroke="#334155" stroke-width="1"/>
+    <rect x="12" y="95" width="28" height="20" rx="4" fill="#38bdf8"/>
+    <text x="26" y="109" font-size="10" font-weight="800" fill="#0f172a" text-anchor="middle">FK</text>
+    <text x="50" y="110" font-size="13" font-weight="600" fill="#38bdf8">session_id</text>
+    <text x="316" y="110" font-size="11" fill="#94a3b8" text-anchor="end">UUID (NOT NULL)</text>
+
+    <!-- Row 3 -->
+    <line x1="0" y1="126" x2="330" y2="126" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="152" font-size="13" font-weight="500" fill="#e2e8f0">term</text>
+    <text x="316" y="152" font-size="11" fill="#94a3b8" text-anchor="end">TEXT (NOT NULL)</text>
+
+    <!-- Row 4 -->
+    <line x1="0" y1="168" x2="330" y2="168" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="194" font-size="13" font-weight="500" fill="#e2e8f0">definition</text>
+    <text x="316" y="194" font-size="11" fill="#94a3b8" text-anchor="end">TEXT (NOT NULL)</text>
+
+    <!-- Row 5 -->
+    <line x1="0" y1="210" x2="330" y2="210" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="236" font-size="13" font-weight="500" fill="#e2e8f0">analogy</text>
+    <text x="316" y="236" font-size="11" fill="#64748b" text-anchor="end">TEXT (nullable)</text>
+
+    <!-- Row 6 -->
+    <line x1="0" y1="252" x2="330" y2="252" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="278" font-size="13" font-weight="500" fill="#e2e8f0">translation</text>
+    <text x="316" y="278" font-size="11" fill="#64748b" text-anchor="end">TEXT (nullable)</text>
+
+    <!-- Row 7 -->
+    <line x1="0" y1="294" x2="330" y2="294" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="320" font-size="13" font-weight="500" fill="#e2e8f0">created_at</text>
+    <text x="316" y="320" font-size="11" fill="#94a3b8" text-anchor="end">TIMESTAMPTZ</text>
+  </g>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- TABLE: CHAT_HISTORY (Bottom Right)          -->
+  <!-- ═══════════════════════════════════════════ -->
+  <g transform="translate(980, 480)" filter="url(#shadow)">
+    <rect width="330" height="42" rx="8" ry="8" fill="#8b5cf6"/>
+    <rect y="34" width="330" height="8" fill="#8b5cf6"/>
+    <text x="165" y="26" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">chat_history</text>
+    
+    <rect y="42" width="330" height="210" fill="#1e293b"/>
+    <rect y="244" width="330" height="8" fill="#1e293b" rx="8" ry="8"/>
+    <rect y="42" width="330" height="210" fill="none" stroke="#7c3aed" stroke-width="2" rx="8" ry="8"/>
+
+    <!-- Row 1: PK -->
+    <rect y="42" width="330" height="42" fill="#334155" opacity="0.5"/>
+    <rect x="12" y="53" width="28" height="20" rx="4" fill="#f59e0b"/>
+    <text x="26" y="67" font-size="10" font-weight="800" fill="#0f172a" text-anchor="middle">PK</text>
+    <text x="50" y="68" font-size="13" font-weight="600" fill="#f8fafc">id</text>
+    <text x="316" y="68" font-size="11" fill="#cbd5e1" text-anchor="end">UUID</text>
+
+    <!-- Row 2: FK -->
+    <line x1="0" y1="84" x2="330" y2="84" stroke="#334155" stroke-width="1"/>
+    <rect x="12" y="95" width="28" height="20" rx="4" fill="#38bdf8"/>
+    <text x="26" y="109" font-size="10" font-weight="800" fill="#0f172a" text-anchor="middle">FK</text>
+    <text x="50" y="110" font-size="13" font-weight="600" fill="#38bdf8">session_id</text>
+    <text x="316" y="110" font-size="11" fill="#94a3b8" text-anchor="end">UUID (NOT NULL)</text>
+
+    <!-- Row 3 -->
+    <line x1="0" y1="126" x2="330" y2="126" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="152" font-size="13" font-weight="500" fill="#e2e8f0">role</text>
+    <text x="316" y="152" font-size="11" fill="#94a3b8" text-anchor="end">TEXT (CHECK user/assistant)</text>
+
+    <!-- Row 4 -->
+    <line x1="0" y1="168" x2="330" y2="168" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="194" font-size="13" font-weight="500" fill="#e2e8f0">content</text>
+    <text x="316" y="194" font-size="11" fill="#94a3b8" text-anchor="end">TEXT (NOT NULL)</text>
+
+    <!-- Row 5 -->
+    <line x1="0" y1="210" x2="330" y2="210" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="236" font-size="13" font-weight="500" fill="#e2e8f0">created_at</text>
+    <text x="316" y="236" font-size="11" fill="#94a3b8" text-anchor="end">TIMESTAMPTZ</text>
+  </g>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- RELATIONSHIP LINES (Connectors)             -->
+  <!-- ═══════════════════════════════════════════ -->
+  
+  <!-- sessions -> transcripts (1:N) -->
+  <path d="M 400 330 L 480 330 L 480 210 L 560 210" fill="none" stroke="#38bdf8" stroke-width="2.5" stroke-dasharray="none" marker-end="url(#arrow)"/>
+  <rect x="445" y="260" width="70" height="22" rx="4" fill="#0f172a" stroke="#38bdf8" stroke-width="1"/>
+  <text x="480" y="275" font-size="11" font-weight="700" fill="#38bdf8" text-anchor="middle">1 : N</text>
+
+  <!-- sessions -> notes (1:1) -->
+  <path d="M 400 365 L 480 365 L 480 490 L 560 490" fill="none" stroke="#10b981" stroke-width="2.5" stroke-dasharray="none" marker-end="url(#arrow)"/>
+  <rect x="445" y="415" width="70" height="22" rx="4" fill="#0f172a" stroke="#10b981" stroke-width="1"/>
+  <text x="480" y="430" font-size="11" font-weight="700" fill="#10b981" text-anchor="middle">1 : 1</text>
+
+  <!-- sessions -> vocabulary (1:N) -->
+  <path d="M 400 300 L 480 300 L 480 60 L 930 60 L 930 210 L 980 210" fill="none" stroke="#f59e0b" stroke-width="2.5" stroke-dasharray="none" marker-end="url(#arrow)"/>
+  <rect x="665" y="49" width="70" height="22" rx="4" fill="#0f172a" stroke="#f59e0b" stroke-width="1"/>
+  <text x="700" y="64" font-size="11" font-weight="700" fill="#f59e0b" text-anchor="middle">1 : N</text>
+
+  <!-- sessions -> chat_history (1:N) -->
+  <path d="M 400 400 L 480 400 L 480 750 L 930 750 L 930 580 L 980 580" fill="none" stroke="#8b5cf6" stroke-width="2.5" stroke-dasharray="none" marker-end="url(#arrow)"/>
+  <rect x="665" y="739" width="70" height="22" rx="4" fill="#0f172a" stroke="#8b5cf6" stroke-width="1"/>
+  <text x="700" y="754" font-size="11" font-weight="700" fill="#8b5cf6" text-anchor="middle">1 : N</text>
+
+  <!-- Legend Box -->
+  <g transform="translate(80, 640)">
+    <rect width="320" height="130" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+    <text x="16" y="26" font-size="13" font-weight="700" fill="#f8fafc">Diagram Legend</text>
+    
+    <rect x="16" y="40" width="24" height="16" rx="3" fill="#f59e0b"/>
+    <text x="28" y="52" font-size="9" font-weight="800" fill="#0f172a" text-anchor="middle">PK</text>
+    <text x="48" y="53" font-size="11" fill="#cbd5e1">Primary Key</text>
+
+    <rect x="140" y="40" width="24" height="16" rx="3" fill="#38bdf8"/>
+    <text x="152" y="52" font-size="9" font-weight="800" fill="#0f172a" text-anchor="middle">FK</text>
+    <text x="172" y="53" font-size="11" fill="#cbd5e1">Foreign Key (ON DELETE CASCADE)</text>
+
+    <line x1="16" y1="76" x2="50" y2="76" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrow)"/>
+    <text x="60" y="80" font-size="11" fill="#cbd5e1">Foreign Key Relationship</text>
+
+    <text x="16" y="108" font-size="11" fill="#94a3b8">RLS Policies enable anonymous public read/write per session_id</text>
+  </g>
+</svg>
