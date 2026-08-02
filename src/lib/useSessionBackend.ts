@@ -1,13 +1,6 @@
 // src/lib/useSessionBackend.ts
 //
 // EduBridge AI — Frontend / Backend Session Integration Hook
-//
-// Connects frontend interactive UI with Supabase Edge Functions:
-//   - Anonymous session creation & lifecycle
-//   - Real-time audio transcription (/stt-proxy)
-//   - Unified AI processing (/process → translation, notes, summary, glossary, keywords in ONE call)
-//   - "I'm Lost" rescue explanation (/im-lost)
-//   - Streamed Ask AI chat (/ask) grounded in lecture context
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import {
@@ -21,8 +14,6 @@ import {
 import {
   createSession,
   saveTranscriptChunk,
-  saveNotes,
-  saveVocabularyTerm,
   saveChatMessage,
   type PersistenceMode,
 } from "./db";
@@ -39,6 +30,7 @@ export interface SessionState {
   keywords: string[];
   chatHistory: ChatTurn[];
   isProcessing: boolean;
+  isTranscribing: boolean;
   error: string | null;
 }
 
@@ -53,29 +45,11 @@ export function useSessionBackend() {
   const [keywords, setKeywords] = useState<string[]>([]);
   const [chatHistory, setChatHistory] = useState<ChatTurn[]>([]);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [isTranscribing, setIsTranscribing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   const chunkIndexRef = useRef<number>(0);
-  const sessionIdRef = useRef<string | null>(null);
-  const runningSummaryRef = useRef<string>("");
-  const notesRef = useRef<string>("");
 
-  // Keep refs in sync for async closures
-  useEffect(() => {
-    sessionIdRef.current = sessionId;
-  }, [sessionId]);
-
-  useEffect(() => {
-    runningSummaryRef.current = runningSummary;
-  }, [runningSummary]);
-
-  useEffect(() => {
-    notesRef.current = notes;
-  }, [notes]);
-
-  /**
-   * Start a new backend session.
-   */
   const startSession = useCallback(
     async (mode: PersistenceMode = "transcript", language: string = "English") => {
       setError(null);
@@ -85,9 +59,7 @@ export function useSessionBackend() {
       });
 
       if (res.ok) {
-        const newId = res.data.session_id;
-        sessionIdRef.current = newId;
-        setSessionId(newId);
+        setSessionId(res.data.session_id);
         setPersistenceMode(mode);
         setTranscript([]);
         setTranslatedTranscript([]);
@@ -97,11 +69,14 @@ export function useSessionBackend() {
         setKeywords([]);
         setChatHistory([]);
         chunkIndexRef.current = 0;
-        return newId;
+        return res.data.session_id;
       } else {
         setError(res.error.message);
         return null;
       }
+
+      setError(res.error.message);
+      return null;
     },
     [],
   );
@@ -126,14 +101,18 @@ export function useSessionBackend() {
     [],
   );
 
-  /**
-   * Process an audio chunk (Blob):
-   * 1. Transcribe via Groq Whisper (/stt-proxy)
-   * 2. Append to rolling live transcript & persist chunk
-   *
-   * Note: Gemini processing (notes, summary, glossary, translation) is omitted
-   * during live recording to ensure low latency and zero quota exhaustion.
-   */
+  const beginTranscribing = useCallback(() => {
+    transcribingCountRef.current += 1;
+    setIsTranscribing(true);
+  }, []);
+
+  const endTranscribing = useCallback(() => {
+    transcribingCountRef.current = Math.max(0, transcribingCountRef.current - 1);
+    if (transcribingCountRef.current === 0) {
+      setIsTranscribing(false);
+    }
+  }, []);
+
   const processAudioChunk = useCallback(
     async (
       audioBlob: Blob,
@@ -141,47 +120,44 @@ export function useSessionBackend() {
       _difficulty: string = "Grade 10",
     ) => {
       if (!audioBlob || audioBlob.size === 0) return;
-      setIsProcessing(true);
+
+      beginTranscribing();
       setError(null);
 
-      // 1. Transcribe audio using Groq Whisper STT
-      const sttRes = await transcribeAudio(audioBlob);
-      if (!sttRes.ok) {
-        setIsProcessing(false);
-        setError(sttRes.error.error);
-        return;
+      try {
+        const sttRes = await transcribeAudio(audioBlob);
+        if (!sttRes.ok) {
+          setError(sttRes.error.error);
+          return;
+        }
+
+        const newText = sttRes.data.text.trim();
+        if (!newText) return;
+
+        setTranscript((prev) => [...prev, newText]);
+
+      let currentSessionId = sessionId;
+      if (!currentSessionId) {
+        currentSessionId = await startSession(persistenceMode, targetLanguage);
       }
 
-      const newText = sttRes.data.text;
-      if (!newText.trim()) {
-        setIsProcessing(false);
-        return;
+          if (currentSessionId) {
+            await saveTranscriptChunk({
+              sessionId: currentSessionId,
+              chunkIndex: currentChunkIndex,
+              text: newText,
+              translatedText: newText,
+              mode: persistenceMode,
+            });
+          }
+        })();
+      } finally {
+        endTranscribing();
       }
-
-      const currentChunkIndex = chunkIndexRef.current++;
-      setTranscript((prev) => [...prev, newText]);
-
-      const currentSessionId = await ensureSession(persistenceMode, targetLanguage);
-
-      // Save transcript chunk to DB
-      if (currentSessionId) {
-        await saveTranscriptChunk({
-          sessionId: currentSessionId,
-          chunkIndex: currentChunkIndex,
-          text: newText,
-          translatedText: newText,
-          mode: persistenceMode,
-        });
-      }
-
-      setIsProcessing(false);
     },
-    [sessionId, persistenceMode, startSession],
+    [beginTranscribing, endTranscribing, persistenceMode, startSession],
   );
 
-  /**
-   * Directly process a raw text segment (for lecture text uploads)
-   */
   const processTextSegment = useCallback(
     async (
       text: string,
@@ -207,7 +183,6 @@ export function useSessionBackend() {
 
       if (procRes.ok) {
         const { translated_text, notes: newNotes, summary, glossary: newGlossary, keywords: newKeywords } = procRes.data;
-
         const translatedLine = translated_text || text;
         setTranslatedTranscript((prev) => [...prev, translatedLine]);
 
@@ -236,7 +211,9 @@ export function useSessionBackend() {
         if (newGlossary && newGlossary.length > 0) {
           setGlossary((prev) => {
             const existingTerms = new Set(prev.map((g) => g.term.toLowerCase()));
-            const uniqueNew = newGlossary.filter((g) => !existingTerms.has(g.term.toLowerCase()));
+            const uniqueNew = newGlossary.filter(
+              (g) => !existingTerms.has(g.term.toLowerCase()),
+            );
             return [...prev, ...uniqueNew];
           });
         }
@@ -246,6 +223,16 @@ export function useSessionBackend() {
         }
       } else {
         setTranslatedTranscript((prev) => [...prev, text]);
+      }
+
+      if (currentSessionId) {
+        await saveTranscriptChunk({
+          sessionId: currentSessionId,
+          chunkIndex: currentChunkIndex,
+          text,
+          translatedText: text,
+          mode: persistenceMode,
+        });
       }
 
       setIsProcessing(false);
@@ -274,7 +261,7 @@ export function useSessionBackend() {
   );
 
   /**
-   * Send a question to Ask AI (streamed)
+   * Send a question to Ask AI and stream the lecture-grounded response.
    */
   const sendAskQuestion = useCallback(
     async (question: string): Promise<boolean> => {
@@ -351,16 +338,26 @@ export function useSessionBackend() {
 
       return true;
     },
-    [
-      persistenceMode,
-      transcript,
-      runningSummary,
-      notes,
-      glossary,
-      keywords,
-      chatHistory,
-      ensureSession,
-    ],
+    [sessionId, chatHistory, runningSummary, transcript, notes, glossary, keywords, persistenceMode],
+  );
+
+  /**
+   * Request "I'm Lost" rescue explanation.
+   */
+  const handleImLost = useCallback(
+    async (currentDifficulty: string): Promise<string | null> => {
+      setError(null);
+      const rollingBuffer = transcript.slice(-5).join(" ");
+
+      const res = await requestImLostExplanation(rollingBuffer, currentDifficulty);
+      if (res.ok) {
+        return res.data.explanation;
+      } else {
+        setError(res.error.error);
+        return null;
+      }
+    },
+    [transcript],
   );
 
   return {
@@ -375,6 +372,7 @@ export function useSessionBackend() {
     keywords,
     chatHistory,
     isProcessing,
+    isTranscribing,
     error,
     startSession,
     processAudioChunk,
