@@ -31,6 +31,7 @@ export interface SessionState {
   sessionId: string | null;
   persistenceMode: PersistenceMode;
   transcript: string[];
+  liveTranscript: string[];
   translatedTranscript: string[];
   runningSummary: string;
   notes: string;
@@ -128,24 +129,22 @@ export function useSessionBackend() {
   /**
    * Process an audio chunk (Blob):
    * 1. Transcribe via Groq Whisper (/stt-proxy)
-   * 2. Execute ONE Gemini processing step (/process) returning:
-   *    - translation
-   *    - notes
-   *    - running summary
-   *    - glossary
-   *    - keywords
+   * 2. Append to rolling live transcript & persist chunk
+   *
+   * Note: Gemini processing (notes, summary, glossary, translation) is omitted
+   * during live recording to ensure low latency and zero quota exhaustion.
    */
   const processAudioChunk = useCallback(
     async (
       audioBlob: Blob,
       targetLanguage: string = "English",
-      difficulty: string = "Grade 10",
+      _difficulty: string = "Grade 10",
     ) => {
       if (!audioBlob || audioBlob.size === 0) return;
       setIsProcessing(true);
       setError(null);
 
-      // 1. Transcribe audio using Groq Whisper
+      // 1. Transcribe audio using Groq Whisper STT
       const sttRes = await transcribeAudio(audioBlob);
       if (!sttRes.ok) {
         setIsProcessing(false);
@@ -164,85 +163,20 @@ export function useSessionBackend() {
 
       const currentSessionId = await ensureSession(persistenceMode, targetLanguage);
 
-      // 2. Single AI Processing Call via Gemini
-      const procRes = await processTranscript(
-        newText,
-        targetLanguage,
-        runningSummaryRef.current,
-        notesRef.current,
-        difficulty,
-      );
-
-      if (procRes.ok) {
-        const { translated_text, notes: newNotes, summary, glossary: newGlossary, keywords: newKeywords } = procRes.data;
-
-        // Update translated transcript
-        const translatedLine = translated_text || newText;
-        setTranslatedTranscript((prev) => [...prev, translatedLine]);
-
-        // Save transcript chunk to DB
-        if (currentSessionId) {
-          await saveTranscriptChunk({
-            sessionId: currentSessionId,
-            chunkIndex: currentChunkIndex,
-            text: newText,
-            translatedText: translatedLine,
-            mode: persistenceMode,
-          });
-        }
-
-        // Update running summary
-        if (summary) {
-          setRunningSummary(summary);
-        }
-
-        // Update notes
-        if (newNotes) {
-          setNotes((prev) => (prev ? `${prev}\n${newNotes}` : newNotes));
-          if (currentSessionId) {
-            await saveNotes({
-              sessionId: currentSessionId,
-              contentMarkdown: notesRef.current ? `${notesRef.current}\n${newNotes}` : newNotes,
-              mode: persistenceMode,
-            });
-          }
-        }
-
-        // Update glossary
-        if (newGlossary && newGlossary.length > 0) {
-          setGlossary((prev) => {
-            const existingTerms = new Set(prev.map((g) => g.term.toLowerCase()));
-            const uniqueNew = newGlossary.filter((g) => !existingTerms.has(g.term.toLowerCase()));
-            return [...prev, ...uniqueNew];
-          });
-
-          // Save vocabulary terms to DB
-          if (currentSessionId) {
-            for (const g of newGlossary) {
-              await saveVocabularyTerm({
-                sessionId: currentSessionId,
-                term: g.term,
-                definition: g.definition,
-                analogy: g.simple_explanation,
-                translation: g.term,
-                mode: persistenceMode,
-              });
-            }
-          }
-        }
-
-        // Update keywords
-        if (newKeywords && newKeywords.length > 0) {
-          setKeywords((prev) => Array.from(newSetFrom(prev, newKeywords)));
-        }
-      } else {
-        // Fallback for translation if process failed
-        setTranslatedTranscript((prev) => [...prev, newText]);
+      // Save transcript chunk to DB
+      if (currentSessionId) {
+        await saveTranscriptChunk({
+          sessionId: currentSessionId,
+          chunkIndex: currentChunkIndex,
+          text: newText,
+          translatedText: newText,
+          mode: persistenceMode,
+        });
       }
 
       setIsProcessing(false);
     },
-    [persistenceMode, ensureSession],
+    [sessionId, persistenceMode, startSession],
   );
 
   /**
@@ -433,6 +367,7 @@ export function useSessionBackend() {
     sessionId,
     persistenceMode,
     transcript,
+    liveTranscript: transcript,
     translatedTranscript,
     runningSummary,
     notes,

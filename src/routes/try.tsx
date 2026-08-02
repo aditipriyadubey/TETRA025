@@ -67,116 +67,154 @@ function TryNow() {
   /* AI Session Hook */
   const session = useSessionBackend();
 
-  /* Recording loop & chunking (sends valid audio chunk every 5 seconds) */
-  const startRecording = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
+  const chunkIntervalRef = useRef<number | null>(null);
 
-      const types = [
-        "audio/webm;codecs=opus",
-        "audio/webm",
-        "audio/mp4",
-        "audio/ogg;codecs=opus",
-      ];
-      let selectedMime = "";
-      for (const t of types) {
-        if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) {
-          selectedMime = t;
-          break;
-        }
+  /* Helper to record standalone valid media chunks for Groq Whisper STT */
+  const startSegmentRecorder = useCallback(() => {
+    if (!streamRef.current || !streamRef.current.active) return;
+
+    const types = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/mp4",
+      "audio/ogg;codecs=opus",
+    ];
+    let selectedMime = "";
+    for (const t of types) {
+      if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) {
+        selectedMime = t;
+        break;
       }
+    }
 
+    try {
       const mr = new MediaRecorder(
-        stream,
+        streamRef.current,
         selectedMime ? { mimeType: selectedMime } : undefined,
       );
       mediaRecorderRef.current = mr;
 
-      let headerBlob: Blob | null = null;
-      let chunkBlobs: Blob[] = [];
-
+      const chunks: Blob[] = [];
       mr.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) {
-          if (!headerBlob) {
-            headerBlob = e.data;
-          }
-          chunkBlobs.push(e.data);
+          chunks.push(e.data);
         }
       };
 
-      // Interval to send chunk to Groq Whisper STT & Gemini /process
-      const sendChunk = async () => {
-        if (chunkBlobs.length > 0) {
-          // Prepend initial container header blob if missing to form valid WebM container
-          const payloadBlobs =
-            headerBlob && chunkBlobs[0] !== headerBlob
-              ? [headerBlob, ...chunkBlobs]
-              : chunkBlobs;
-
-          const currentMime = mr.mimeType || selectedMime || "audio/webm";
-          const chunkToSend = new Blob(payloadBlobs, { type: currentMime });
-          chunkBlobs = [];
-
-          // Only transmit if size > 1KB to avoid 0-byte or corrupt header-only slices
-          if (chunkToSend.size > 1000) {
-            await session.processAudioChunk(chunkToSend, language, difficulty);
+      mr.onstop = async () => {
+        if (chunks.length > 0) {
+          const mime = mr.mimeType || selectedMime || "audio/webm";
+          const validChunkBlob = new Blob(chunks, { type: mime });
+          if (validChunkBlob.size > 500) {
+            await session.processAudioChunk(validChunkBlob, language, difficulty);
           }
         }
       };
 
-      mr.start(1000); // collect data slice every second
-      const intervalId = window.setInterval(sendChunk, 5000);
+      mr.start();
+    } catch (err) {
+      console.error("Error starting segment recorder:", err);
+    }
+  }, [session, language, difficulty]);
+
+  /* Start Recording */
+  const startRecording = useCallback(async () => {
+    try {
+      if (!streamRef.current || !streamRef.current.active) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        streamRef.current = stream;
+      }
 
       setRecordingState("recording");
       setRecordingTime(0);
 
+      // Begin segment recording
+      startSegmentRecorder();
+
+      // Cycle segment recorder every 5 seconds to send valid standalone audio chunks
+      if (chunkIntervalRef.current) window.clearInterval(chunkIntervalRef.current);
+      chunkIntervalRef.current = window.setInterval(() => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+          mediaRecorderRef.current.stop();
+          startSegmentRecorder();
+        }
+      }, 5000);
+
+      // Increment recording timer
+      if (timerRef.current) window.clearInterval(timerRef.current);
       timerRef.current = window.setInterval(() => {
         setRecordingTime((t) => t + 1);
       }, 1000);
-
-      mr.onstop = async () => {
-        window.clearInterval(intervalId);
-        await sendChunk();
-      };
     } catch {
       toast.error("Microphone access denied", {
         description: "Please allow microphone access in your browser settings.",
       });
     }
-  }, [session, language, difficulty]);
+  }, [startSegmentRecorder]);
 
+  /* Pause Recording */
   const pauseRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state === "recording") {
-      mediaRecorderRef.current.pause();
-      setRecordingState("paused");
-      if (timerRef.current) {
-        window.clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
+    if (chunkIntervalRef.current) {
+      window.clearInterval(chunkIntervalRef.current);
+      chunkIntervalRef.current = null;
     }
-  }, []);
-
-  const resumeRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state === "paused") {
-      mediaRecorderRef.current.resume();
-      setRecordingState("recording");
-      timerRef.current = window.setInterval(() => {
-        setRecordingTime((t) => t + 1);
-      }, 1000);
-    }
-  }, []);
-
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
-    }
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    setRecordingState("idle");
     if (timerRef.current) {
       window.clearInterval(timerRef.current);
       timerRef.current = null;
     }
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
+
+    setRecordingState("paused");
+    toast.info("Recording paused");
+  }, []);
+
+  /* Resume Recording */
+  const resumeRecording = useCallback(() => {
+    if (!streamRef.current || !streamRef.current.active) return;
+
+    setRecordingState("recording");
+
+    startSegmentRecorder();
+
+    if (chunkIntervalRef.current) window.clearInterval(chunkIntervalRef.current);
+    chunkIntervalRef.current = window.setInterval(() => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+        mediaRecorderRef.current.stop();
+        startSegmentRecorder();
+      }
+    }, 5000);
+
+    if (timerRef.current) window.clearInterval(timerRef.current);
+    timerRef.current = window.setInterval(() => {
+      setRecordingTime((t) => t + 1);
+    }, 1000);
+
+    toast.info("Recording resumed");
+  }, [startSegmentRecorder]);
+
+  /* Stop Recording & Finalize Transcript */
+  const stopRecording = useCallback(() => {
+    if (chunkIntervalRef.current) {
+      window.clearInterval(chunkIntervalRef.current);
+      chunkIntervalRef.current = null;
+    }
+    if (timerRef.current) {
+      window.clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+
+    setRecordingState("idle");
+    toast.success("Recording stopped. Transcript finalized.");
   }, []);
 
   /* Process Uploaded File */
@@ -200,6 +238,7 @@ function TryNow() {
 
   useEffect(() => {
     return () => {
+      if (chunkIntervalRef.current) window.clearInterval(chunkIntervalRef.current);
       if (timerRef.current) window.clearInterval(timerRef.current);
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
@@ -250,7 +289,7 @@ function TryNow() {
               <span
                 className={`size-1.5 rounded-full ${
                   recordingState === "recording"
-                    ? "bg-destructive"
+                    ? "bg-destructive animate-pulse"
                     : recordingState === "paused"
                     ? "bg-yellow-500"
                     : uploadedFile
@@ -284,7 +323,7 @@ function TryNow() {
               onClick={() => setMode("upload")}
               icon={<FileVideo className="size-8 text-primary" strokeWidth={1.4} />}
               title="Upload Lecture Audio / Video"
-              description="Drop or select a recorded lecture file. Transcribes with Groq Whisper & executes unified AI analysis."
+              description="Drop or select a recorded lecture file. Transcribes with Groq Whisper STT."
               accent="primary"
             />
             <InputCard
@@ -293,7 +332,7 @@ function TryNow() {
               }}
               icon={<Radio className="size-8 text-emerald" strokeWidth={1.4} />}
               title="Record Live Classroom Audio"
-              description="Use your microphone during class. Continuous Groq Whisper transcription & real-time Gemini processing."
+              description="Use your microphone during class. Continuous Groq Whisper STT live transcription."
               accent="emerald"
             />
           </div>
@@ -332,7 +371,7 @@ function TryNow() {
           </div>
         )}
 
-        {/* Main Classroom Grid (when recording or file loaded) */}
+        {/* Main Classroom Grid (when recording, file loaded, or transcript exists) */}
         {(isLiveSession || uploadedFile || session.transcript.length > 0) && (
           <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr] min-h-[580px]">
             {/* Left Column: Side-by-Side Dual Transcript */}
@@ -592,10 +631,10 @@ function LiveControlBar({
           </p>
           <p className="font-mono text-[10.5px] text-muted-foreground">
             {isActive
-              ? `${formatTime(recordingTime)} · streaming chunks to Groq & Gemini`
+              ? `${formatTime(recordingTime)} · streaming live transcript with Groq Whisper STT`
               : isPaused
-              ? `${formatTime(recordingTime)} · paused — tap to resume`
-              : "Tap the mic to start live classroom recording"}
+              ? `${formatTime(recordingTime)} · paused — transcript preserved`
+              : "Tap Start Recording to begin live classroom transcription"}
           </p>
         </div>
       </div>
@@ -603,21 +642,29 @@ function LiveControlBar({
       <Waveform active={isActive} bars={40} height={34} className="hidden md:flex" />
 
       <div className="flex items-center gap-2">
-        {!isIdle && (
+        {isIdle ? (
+          <button
+            onClick={onStart}
+            className="inline-flex items-center gap-2 rounded-full bg-foreground px-5 py-2.5 text-[12.5px] font-medium text-background transition-all duration-300 hover:opacity-90"
+          >
+            <Mic className="size-3.5" />
+            Start Recording
+          </button>
+        ) : (
           <>
             <button
               onClick={isActive ? onPause : onResume}
-              className="inline-flex items-center gap-2 rounded-full border border-border bg-elevated px-4 py-2.5 text-[12.5px] transition-all duration-300 hover:border-primary/40 hover:text-primary"
+              className="inline-flex items-center gap-2 rounded-full border border-border bg-elevated px-4 py-2.5 text-[12.5px] font-medium transition-all duration-300 hover:border-primary/40 hover:text-primary"
             >
               {isActive ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
-              {isActive ? "Pause" : "Resume"}
+              {isActive ? "Pause Recording" : "Resume Recording"}
             </button>
             <button
               onClick={onStop}
-              className="inline-flex items-center gap-2 rounded-full border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-[12.5px] text-destructive transition-all duration-300 hover:border-destructive/50 hover:bg-destructive/20"
+              className="inline-flex items-center gap-2 rounded-full border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-[12.5px] font-medium text-destructive transition-all duration-300 hover:border-destructive/50 hover:bg-destructive/20"
             >
               <Square className="size-3.5" />
-              Stop
+              Stop Recording & Generate Notes
             </button>
           </>
         )}
