@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-08-02T00:00:00.000Z" agent="EduBridge AI" version="24.0.0" type="device">
+  <diagram id="er-diagram" name="Entity Relationship Diagram">
+    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0" background="#fafafa">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- Title -->
+        <mxCell id="title" value="EduBridge AI — Entity Relationship Diagram" style="text;html=1;fontSize=22;fontStyle=1;fontColor=#111827;align=center;verticalAlign=middle;fontFamily=Inter;" vertex="1" parent="1">
+          <mxGeometry x="400" y="15" width="600" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="subtitle" value="Crow's Foot Notation  |  Supabase PostgreSQL 15  |  All FKs CASCADE on DELETE" style="text;html=1;fontSize=12;fontColor=#6b7280;align=center;verticalAlign=middle;fontFamily=Inter;" vertex="1" parent="1">
+          <mxGeometry x="400" y="50" width="600" height="22" as="geometry"/>
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- ENTITY: Session (CENTER)                    -->
+        <!-- ═══════════════════════════════════════════ -->
+        <mxCell id="session_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#4f46e5;strokeWidth=2;arcSize=8;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="560" y="280" width="280" height="240" as="geometry"/>
+        </mxCell>
+        <mxCell id="session_title" value="Session" style="text;html=1;fontSize=16;fontStyle=1;fontColor=#ffffff;align=center;verticalAlign=middle;fontFamily=Inter;fillColor=#4f46e5;rounded=1;arcSize=12;spacingTop=2;spacingBottom=2;" vertex="1" parent="1">
+          <mxGeometry x="570" y="290" width="260" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="session_attrs" value="&lt;div style='text-align:left;padding:6px 12px;font-family:Inter;font-size:12px;color:#374151;line-height:1.8;'&gt;&lt;u&gt;&lt;b&gt;session_id&lt;/b&gt;&lt;/u&gt; &lt;span style='color:#4f46e5;'&gt;UUID  PK&lt;/span&gt;&lt;br&gt;persistence_mode &lt;span style='color:#6b7280;'&gt;TEXT&lt;/span&gt;&lt;br&gt;language &lt;span style='color:#6b7280;'&gt;TEXT&lt;/span&gt;&lt;br&gt;consent_token &lt;span style='color:#9ca3af;'&gt;TEXT (nullable)&lt;/span&gt;&lt;br&gt;created_at &lt;span style='color:#6b7280;'&gt;TIMESTAMPTZ&lt;/span&gt;&lt;/div&gt;" style="text;html=1;verticalAlign=top;align=left;overflow=fill;" vertex="1" parent="1">
+          <mxGeometry x="570" y="330" width="260" height="180" as="geometry"/>
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- ENTITY: Transcript (TOP-RIGHT)              -->
+        <!-- ═══════════════════════════════════════════ -->
+        <mxCell id="transcript_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#2563eb;strokeWidth=2;arcSize=8;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="90" width="280" height="280" as="geometry"/>
+        </mxCell>
+        <mxCell id="transcript_title" value="Transcript" style="text;html=1;fontSize=16;fontStyle=1;fontColor=#ffffff;align=center;verticalAlign=middle;fontFamily=Inter;fillColor=#2563eb;rounded=1;arcSize=12;spacingTop=2;spacingBottom=2;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="100" width="260" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="transcript_attrs" value="&lt;div style='text-align:left;padding:6px 12px;font-family:Inter;font-size:12px;color:#374151;line-height:1.8;'&gt;&lt;u&gt;&lt;b&gt;id&lt;/b&gt;&lt;/u&gt; &lt;span style='color:#2563eb;'&gt;UUID  PK&lt;/span&gt;&lt;br&gt;session_id &lt;span style='color:#dc2626;'&gt;UUID  FK&lt;/span&gt;&lt;br&gt;chunk_index &lt;span style='color:#6b7280;'&gt;INTEGER&lt;/span&gt;&lt;br&gt;text &lt;span style='color:#6b7280;'&gt;TEXT&lt;/span&gt;&lt;br&gt;translated_text &lt;span style='color:#9ca3af;'&gt;TEXT (nullable)&lt;/span&gt;&lt;br&gt;created_at &lt;span style='color:#6b7280;'&gt;TIMESTAMPTZ&lt;/span&gt;&lt;br&gt;&lt;br&gt;&lt;span style='color:#9ca3af;font-size:11px;'&gt;UNIQUE(session_id, chunk_index)&lt;/span&gt;&lt;/div&gt;" style="text;html=1;verticalAlign=top;align=left;overflow=fill;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="140" width="260" height="220" as="geometry"/>
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- ENTITY: Note (RIGHT)                        -->
+        <!-- ═══════════════════════════════════════════ -->
+        <mxCell id="note_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#059669;strokeWidth=2;arcSize=8;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="420" width="280" height="200" as="geometry"/>
+        </mxCell>
+        <mxCell id="note_title" value="Note" style="text;html=1;fontSize=16;fontStyle=1;fontColor=#ffffff;align=center;verticalAlign=middle;fontFamily=Inter;fillColor=#059669;rounded=1;arcSize=12;spacingTop=2;spacingBottom=2;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="430" width="260" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="note_attrs" value="&lt;div style='text-align:left;padding:6px 12px;font-family:Inter;font-size:12px;color:#374151;line-height:1.8;'&gt;&lt;u&gt;&lt;b&gt;session_id&lt;/b&gt;&lt;/u&gt; &lt;span style='color:#059669;'&gt;UUID  PK&lt;/span&gt; &lt;span style='color:#dc2626;'&gt;FK&lt;/span&gt;&lt;br&gt;content_markdown &lt;span style='color:#6b7280;'&gt;TEXT&lt;/span&gt;&lt;br&gt;updated_at &lt;span style='color:#6b7280;'&gt;TIMESTAMPTZ&lt;/span&gt;&lt;/div&gt;" style="text;html=1;verticalAlign=top;align=left;overflow=fill;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="470" width="260" height="140" as="geometry"/>
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- ENTITY: Vocabulary (BOTTOM-RIGHT)           -->
+        <!-- ═══════════════════════════════════════════ -->
+        <mxCell id="vocab_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d97706;strokeWidth=2;arcSize=8;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="670" width="280" height="280" as="geometry"/>
+        </mxCell>
+        <mxCell id="vocab_title" value="Vocabulary" style="text;html=1;fontSize=16;fontStyle=1;fontColor=#ffffff;align=center;verticalAlign=middle;fontFamily=Inter;fillColor=#d97706;rounded=1;arcSize=12;spacingTop=2;spacingBottom=2;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="680" width="260" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="vocab_attrs" value="&lt;div style='text-align:left;padding:6px 12px;font-family:Inter;font-size:12px;color:#374151;line-height:1.8;'&gt;&lt;u&gt;&lt;b&gt;id&lt;/b&gt;&lt;/u&gt; &lt;span style='color:#d97706;'&gt;UUID  PK&lt;/span&gt;&lt;br&gt;session_id &lt;span style='color:#dc2626;'&gt;UUID  FK&lt;/span&gt;&lt;br&gt;term &lt;span style='color:#6b7280;'&gt;TEXT&lt;/span&gt;&lt;br&gt;definition &lt;span style='color:#6b7280;'&gt;TEXT&lt;/span&gt;&lt;br&gt;analogy &lt;span style='color:#9ca3af;'&gt;TEXT (nullable)&lt;/span&gt;&lt;br&gt;translation &lt;span style='color:#9ca3af;'&gt;TEXT (nullable)&lt;/span&gt;&lt;br&gt;created_at &lt;span style='color:#6b7280;'&gt;TIMESTAMPTZ&lt;/span&gt;&lt;/div&gt;" style="text;html=1;verticalAlign=top;align=left;overflow=fill;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="720" width="260" height="220" as="geometry"/>
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- ENTITY: ChatMessage (BOTTOM-LEFT)           -->
+        <!-- ═══════════════════════════════════════════ -->
+        <mxCell id="chat_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#7c3aed;strokeWidth=2;arcSize=8;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="620" width="280" height="260" as="geometry"/>
+        </mxCell>
+        <mxCell id="chat_title" value="ChatMessage" style="text;html=1;fontSize=16;fontStyle=1;fontColor=#ffffff;align=center;verticalAlign=middle;fontFamily=Inter;fillColor=#7c3aed;rounded=1;arcSize=12;spacingTop=2;spacingBottom=2;" vertex="1" parent="1">
+          <mxGeometry x="110" y="630" width="260" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="chat_attrs" value="&lt;div style='text-align:left;padding:6px 12px;font-family:Inter;font-size:12px;color:#374151;line-height:1.8;'&gt;&lt;u&gt;&lt;b&gt;id&lt;/b&gt;&lt;/u&gt; &lt;span style='color:#7c3aed;'&gt;UUID  PK&lt;/span&gt;&lt;br&gt;session_id &lt;span style='color:#dc2626;'&gt;UUID  FK&lt;/span&gt;&lt;br&gt;role &lt;span style='color:#6b7280;'&gt;TEXT&lt;/span&gt; &lt;span style='color:#9ca3af;font-size:11px;'&gt;('user' | 'assistant')&lt;/span&gt;&lt;br&gt;content &lt;span style='color:#6b7280;'&gt;TEXT&lt;/span&gt;&lt;br&gt;created_at &lt;span style='color:#6b7280;'&gt;TIMESTAMPTZ&lt;/span&gt;&lt;/div&gt;" style="text;html=1;verticalAlign=top;align=left;overflow=fill;" vertex="1" parent="1">
+          <mxGeometry x="110" y="670" width="260" height="200" as="geometry"/>
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- RELATIONSHIP ARROWS (Crow's Foot)           -->
+        <!-- ═══════════════════════════════════════════ -->
+
+        <!-- Session -||--o{- Transcript  "captures" -->
+        <mxCell id="rel_session_transcript" value="captures" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#374151;strokeWidth=2;fontColor=#374151;fontSize=12;fontStyle=2;fontFamily=Inter;endArrow=ERmany;endFill=0;startArrow=ERmandOne;startFill=0;labelBackgroundColor=#fafafa;exitX=1;exitY=0.2;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="session_box" target="transcript_box" parent="1">
+          <mxGeometry x="-0.2" y="10" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Session -||--o|- Note  "generates" -->
+        <mxCell id="rel_session_note" value="generates" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#374151;strokeWidth=2;fontColor=#374151;fontSize=12;fontStyle=2;fontFamily=Inter;endArrow=ERone;endFill=0;startArrow=ERmandOne;startFill=0;labelBackgroundColor=#fafafa;exitX=1;exitY=0.6;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="session_box" target="note_box" parent="1">
+          <mxGeometry x="-0.2" y="10" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Session -||--o{- Vocabulary  "extracts" -->
+        <mxCell id="rel_session_vocab" value="extracts" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#374151;strokeWidth=2;fontColor=#374151;fontSize=12;fontStyle=2;fontFamily=Inter;endArrow=ERmany;endFill=0;startArrow=ERmandOne;startFill=0;labelBackgroundColor=#fafafa;exitX=1;exitY=0.9;exitDx=0;exitDy=0;entryX=0;entryY=0.3;entryDx=0;entryDy=0;" edge="1" source="session_box" target="vocab_box" parent="1">
+          <mxGeometry x="-0.3" y="10" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Session -||--o{- ChatMessage  "logs" -->
+        <mxCell id="rel_session_chat" value="logs" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#374151;strokeWidth=2;fontColor=#374151;fontSize=12;fontStyle=2;fontFamily=Inter;endArrow=ERmany;endFill=0;startArrow=ERmandOne;startFill=0;labelBackgroundColor=#fafafa;exitX=0;exitY=0.85;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="session_box" target="chat_box" parent="1">
+          <mxGeometry x="-0.3" y="-10" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- LEGEND BOX (Bottom-Left)                    -->
+        <!-- ═══════════════════════════════════════════ -->
+        <mxCell id="legend_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3f4f6;strokeColor=#d1d5db;strokeWidth=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="100" y="100" width="300" height="200" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend_title" value="Legend — Crow's Foot Notation" style="text;html=1;fontSize=13;fontStyle=1;fontColor=#111827;align=center;verticalAlign=middle;fontFamily=Inter;" vertex="1" parent="1">
+          <mxGeometry x="110" y="108" width="280" height="28" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend_content" value="&lt;div style='text-align:left;padding:4px 14px;font-family:Inter;font-size:11.5px;color:#374151;line-height:2;'&gt;&lt;b&gt;||&lt;/b&gt; — One (mandatory)&lt;br&gt;&lt;b&gt;o|&lt;/b&gt; — One (optional)&lt;br&gt;&lt;b&gt;&gt;|&lt;/b&gt; — Many (mandatory)&lt;br&gt;&lt;b&gt;&gt;o&lt;/b&gt; — Many (optional)&lt;br&gt;&lt;b&gt;||--o{&lt;/b&gt; — One-to-Many&lt;br&gt;&lt;b&gt;||--||&lt;/b&gt; — One-to-One&lt;br&gt;&lt;span style='color:#dc2626;'&gt;FK&lt;/span&gt; = Foreign Key&amp;nbsp;&amp;nbsp;|&amp;nbsp;&amp;nbsp;&lt;u&gt;&lt;b&gt;PK&lt;/b&gt;&lt;/u&gt; = Primary Key&lt;/div&gt;" style="text;html=1;verticalAlign=top;align=left;overflow=fill;" vertex="1" parent="1">
+          <mxGeometry x="110" y="136" width="280" height="156" as="geometry"/>
+        </mxCell>
+
+        <!-- Cardinality labels on diagram -->
+        <mxCell id="card_transcript" value="0..*" style="text;html=1;fontSize=11;fontStyle=1;fontColor=#2563eb;align=center;fontFamily=Inter;" vertex="1" parent="1">
+          <mxGeometry x="990" y="210" width="30" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="card_note" value="0..1" style="text;html=1;fontSize=11;fontStyle=1;fontColor=#059669;align=center;fontFamily=Inter;" vertex="1" parent="1">
+          <mxGeometry x="990" y="510" width="30" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="card_vocab" value="0..*" style="text;html=1;fontSize=11;fontStyle=1;fontColor=#d97706;align=center;fontFamily=Inter;" vertex="1" parent="1">
+          <mxGeometry x="990" y="740" width="30" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="card_chat" value="0..*" style="text;html=1;fontSize=11;fontStyle=1;fontColor=#7c3aed;align=center;fontFamily=Inter;" vertex="1" parent="1">
+          <mxGeometry x="260" y="598" width="30" height="20" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
