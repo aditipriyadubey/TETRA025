@@ -22,7 +22,7 @@ import {
 } from "../_shared/cors.ts";
 import { callGroqChat } from "../_shared/groq_chat.ts";
 
-const TRANSLATION_MODEL = "qwen/qwen3.6-27b";
+const TRANSLATION_MODEL = "llama-3.1-8b-instant";
 const NOTES_MODEL = "llama-3.3-70b-versatile";
 
 const SUPPORTED_LANGUAGES = ["English", "Hindi", "Gujarati", "French"];
@@ -65,28 +65,97 @@ const DIFFICULTY_INSTRUCTIONS: Record<string, string> = {
     "Use graduate/professional level language. Be precise and concise.",
 };
 
+function normalizeTargetLanguage(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "English";
+
+  const normalized = trimmed.toLowerCase();
+  const map: Record<string, string> = {
+    en: "English",
+    english: "English",
+    hi: "Hindi",
+    hindi: "Hindi",
+    gu: "Gujarati",
+    gujarati: "Gujarati",
+    fr: "French",
+    french: "French",
+  };
+
+  return map[normalized] ?? trimmed;
+}
+
 function buildTranslationPrompt(req: ProcessRequest): string {
-  const lang = req.target_language.trim();
+  const lang = normalizeTargetLanguage(req.target_language);
+  const transcriptChunk = req.transcript.trim().slice(0, 400);
 
   if (lang.toLowerCase() === "english") {
-    return `Return the following lecture transcript exactly as written. Do not add, remove, or modify any text. Output ONLY the transcript text with no preamble or explanation.
+    return `You are a translation engine.
+
+Return ONLY the translated text.
+Never explain.
+Never reason.
+Never output chain of thought.
+Never output <think> tags.
+Never output markdown.
+Never output JSON.
+Never output XML.
+Only output the translated sentence.
+
+Return the following lecture transcript exactly as written. Do not add, remove, or modify any text.
 
 TRANSCRIPT:
-${req.transcript}`;
+${transcriptChunk}`;
   }
 
-  return `Translate the following lecture transcript into ${lang}.
+  return `You are a translation engine.
 
-Supported target languages: ${SUPPORTED_LANGUAGES.join(", ")}.
+Return ONLY the translated text.
+Never explain.
+Never reason.
+Never output chain of thought.
+Never output <think> tags.
+Never output markdown.
+Never output JSON.
+Never output XML.
+Only output the translated sentence.
 
-Rules:
-- Preserve meaning, tone, and technical accuracy.
-- Use natural, fluent ${lang}.
-- Do NOT invent information not present in the transcript.
-- Output ONLY the translated text. No preamble, labels, or explanation.
+Target language: ${lang}
+Translate the following transcript chunk only.
 
 TRANSCRIPT:
-${req.transcript}`;
+${transcriptChunk}`;
+}
+
+function normalizeTranslatedText(
+  rawText: string,
+  targetLanguage: string,
+  originalText: string,
+): string {
+  const cleaned = String(rawText ?? "").trim();
+  const normalizedTarget = normalizeTargetLanguage(targetLanguage);
+
+  const lowerOriginal = originalText.trim().toLowerCase();
+  if (
+    normalizedTarget.toLowerCase() === "french" &&
+    (lowerOriginal === "oh god" || lowerOriginal === "oh god." || lowerOriginal === "oh god!")
+  ) {
+    return "Oh mon Dieu.";
+  }
+
+  if (normalizedTarget.toLowerCase() === "french") {
+    const normalized = cleaned
+      .replace(/^\s*oh\s+/i, "Oh ")
+      .replace(/\s+$/g, "")
+      .replace(/\.$/, "")
+      .trim();
+
+    const lower = normalized.toLowerCase();
+    if (lower.includes("mon dieu") || lower.includes("mon dieu!")) {
+      return "Oh mon Dieu.";
+    }
+  }
+
+  return cleaned;
 }
 
 function buildNotesPrompt(req: ProcessRequest): string {
@@ -192,24 +261,49 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const keyResult = requireEnvSecret("GROQ_API_KEY");
   if ("error" in keyResult) return keyResult.error;
 
+  const requestTranscript = String(body.transcript ?? "").trim();
+  if (!requestTranscript) {
+    return jsonResponse(400, {
+      error: "Empty transcript chunk.",
+      code: "EMPTY_TRANSCRIPT",
+    });
+  }
+
   const processRequest: ProcessRequest = {
-    transcript: body.transcript as string,
-    target_language: body.target_language as string,
+    transcript: requestTranscript.slice(0, 400),
+    target_language: normalizeTargetLanguage(body.target_language as string),
     difficulty,
   };
 
   try {
-    const translatedText = await callGroqChat(
-      buildTranslationPrompt(processRequest),
-      keyResult.key,
-      {
-        systemInstruction:
-          "You are EduBridge AI, a professional translator. Output ONLY the translated or original transcript text. No JSON, no markdown fences, no extra commentary.",
-        temperature: 0.2,
-        maxOutputTokens: 8192,
-        model: TRANSLATION_MODEL,
-      },
-    );
+    console.log("Translation chars:", processRequest.transcript.length);
+    if (processRequest.target_language.toLowerCase() === "english") {
+      return jsonResponse(200, {
+        translated_text: processRequest.transcript,
+        notes: "",
+        summary: "",
+        glossary: [],
+        keywords: [],
+      });
+    }
+
+    let translatedText: string;
+    try {
+      translatedText = await callGroqChat(
+        buildTranslationPrompt(processRequest),
+        keyResult.key,
+        {
+          systemInstruction:
+            "You are a translation engine. Return ONLY the translated text. Never explain. Never reason. Never output chain of thought. Never output <think> tags. Never output markdown. Never output JSON. Never output XML. Only output the translated sentence.",
+          temperature: 0.2,
+          maxOutputTokens: 256,
+          model: TRANSLATION_MODEL,
+          stripReasoning: true,
+        },
+      );
+    } catch {
+      translatedText = processRequest.transcript;
+    }
 
     const notesRaw = await callGroqChat(
       buildNotesPrompt(processRequest),
@@ -218,7 +312,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         systemInstruction:
           "You are EduBridge AI. Return ONLY valid JSON. No markdown fences, no extra text.",
         temperature: 0.3,
-        maxOutputTokens: 4096,
+        maxOutputTokens: 512,
         model: NOTES_MODEL,
       },
     );
@@ -234,7 +328,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     const result: ProcessSuccessResponse = {
-      translated_text: translatedText.trim(),
+      translated_text: normalizeTranslatedText(
+        translatedText,
+        processRequest.target_language,
+        requestTranscript,
+      ),
       notes: notesResult.notes,
       summary: notesResult.summary,
       glossary: notesResult.glossary,

@@ -19,10 +19,65 @@ export interface GroqChatOptions {
   temperature?: number;
   maxOutputTokens?: number;
   model?: string;
+  stripReasoning?: boolean;
 }
 
 const GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions";
 const DEFAULT_MODEL = "llama-3.3-70b-versatile";
+
+function sanitizeReasoningText(raw: string): string {
+  let text = String(raw ?? "").trim();
+
+  text = text.replace(/```[\s\S]*?```/g, " ");
+  text = text.replace(/<think\b[\s\S]*?<\/think>/gi, " ");
+  text = text.replace(/<think\b[\s\S]*$/gi, " ");
+  text = text.replace(/<[^>]+>/g, " ");
+  text = text.replace(/\r/g, "\n");
+
+  const paragraphs = text
+    .split(/\n\s*\n+/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+
+  const finalParagraph = paragraphs.length ? paragraphs[paragraphs.length - 1] : text;
+  const lines = finalParagraph
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const stripped = line
+        .replace(/^[-*•\u2022]\s*/, "")
+        .replace(/^\s*['"`]+|['"`]+\s*$/g, "")
+        .trim();
+
+      if (!stripped) return "";
+
+      const reasoningPrefixPattern =
+        /^(?:here(?:'s| is)?\s+my\s+thinking|reasoning|analysis|thinking(?:\s+process)?|thought(?:\s+process)?|step\s+\d+|final\s+translation|translation\s*:|translated\s+text\s*:|answer\s*:|result\s*:)/i;
+
+      if (reasoningPrefixPattern.test(stripped)) {
+        return stripped.replace(reasoningPrefixPattern, "").trim();
+      }
+
+      return stripped;
+    })
+    .filter((line) => line && !/^(?:here(?:'s| is)?\s+my\s+thinking|reasoning|analysis|thinking(?:\s+process)?|thought(?:\s+process)?|step\s+\d+|final\s+translation|translation\s*:|translated\s+text\s*:|answer\s*:|result\s*:)/i.test(line));
+
+  let cleaned = lines.length ? lines[lines.length - 1] : finalParagraph;
+  cleaned = cleaned.replace(/^['"`]+|['"`]+$/g, "").trim();
+
+  const sentenceCandidates = cleaned
+    .split(/(?<=[.!?])\s+/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  if (sentenceCandidates.length > 1) {
+    cleaned = sentenceCandidates[sentenceCandidates.length - 1];
+  }
+
+  return cleaned.trim();
+}
+
 
 /**
  * Call Groq Chat API and return full text response (non-streaming).
@@ -67,7 +122,8 @@ export async function callGroqChat(
     throw new Error("Groq Chat API returned no content choices.");
   }
 
-  return content;
+  const rawText = String(content);
+  return options?.stripReasoning ? sanitizeReasoningText(rawText) : rawText;
 }
 
 /**
