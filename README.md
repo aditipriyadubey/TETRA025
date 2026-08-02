@@ -229,9 +229,25 @@ Step 8  Data is persisted to Supabase PostgreSQL via the RLS-protected client
 
 ---
 
-## Database Schema
+## Database Schema & Diagrams
 
-The application uses five tables in Supabase PostgreSQL, all protected by Row Level Security:
+The application uses five tables in Supabase PostgreSQL, all protected by Row Level Security (RLS). 
+
+### Visual Database Schema Diagram
+
+![EduBridge AI Database Schema Diagram](docs/database-schema.svg)
+*Figure 13: Database Schema Diagram — color-coded tables, PK/FK badges, column types, and foreign key relationships. Editable source: [`docs/database-schema.drawio`](docs/database-schema.drawio)*
+
+<br>
+
+### Visual Entity Relationship Diagram (ERD)
+
+![EduBridge AI Entity Relationship Diagram](docs/entity-relationship.svg)
+*Figure 14: Entity Relationship Diagram — Crow's Foot notation, entity attributes, primary/foreign keys, and cardinalities. Editable source: [`docs/entity-relationship.drawio`](docs/entity-relationship.drawio)*
+
+---
+
+### Database Table Definitions
 
 ```
 sessions
@@ -269,57 +285,6 @@ chat_history
   role              TEXT        ('user' | 'assistant')
   content           TEXT
   created_at        TIMESTAMPTZ
-```
-
-### Entity Relationship Diagram
-
-```mermaid
-erDiagram
-    sessions ||--o{ transcripts : "has many"
-    sessions ||--o| notes : "has one"
-    sessions ||--o{ vocabulary : "has many"
-    sessions ||--o{ chat_history : "has many"
-
-    sessions {
-        uuid session_id PK
-        text persistence_mode
-        text language
-        text consent_token
-        timestamptz created_at
-    }
-
-    transcripts {
-        uuid id PK
-        uuid session_id FK
-        integer chunk_index
-        text text
-        text translated_text
-        timestamptz created_at
-    }
-
-    notes {
-        uuid session_id PK
-        text content_markdown
-        timestamptz updated_at
-    }
-
-    vocabulary {
-        uuid id PK
-        uuid session_id FK
-        text term
-        text definition
-        text analogy
-        text translation
-        timestamptz created_at
-    }
-
-    chat_history {
-        uuid id PK
-        uuid session_id FK
-        text role
-        text content
-        timestamptz created_at
-    }
 ```
 
 ---
