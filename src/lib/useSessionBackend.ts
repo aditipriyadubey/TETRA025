@@ -1,13 +1,6 @@
 // src/lib/useSessionBackend.ts
 //
 // EduBridge AI — Frontend / Backend Session Integration Hook
-//
-// Connects frontend interactive UI with Supabase Edge Functions:
-//   - Anonymous session creation & lifecycle
-//   - Real-time audio transcription (/stt-proxy)
-//   - Unified AI processing (/process → translation, notes, summary, glossary, keywords in ONE call)
-//   - "I'm Lost" rescue explanation (/im-lost)
-//   - Streamed Ask AI chat (/ask) grounded in lecture context
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import {
@@ -21,8 +14,6 @@ import {
 import {
   createSession,
   saveTranscriptChunk,
-  saveNotes,
-  saveVocabularyTerm,
   saveChatMessage,
   type PersistenceMode,
 } from "./db";
@@ -39,6 +30,7 @@ export interface SessionState {
   keywords: string[];
   chatHistory: ChatTurn[];
   isProcessing: boolean;
+  isTranscribing: boolean;
   error: string | null;
 }
 
@@ -53,14 +45,15 @@ export function useSessionBackend() {
   const [keywords, setKeywords] = useState<string[]>([]);
   const [chatHistory, setChatHistory] = useState<ChatTurn[]>([]);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [isTranscribing, setIsTranscribing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  const chunkIndexRef = useRef<number>(0);
   const sessionIdRef = useRef<string | null>(null);
   const runningSummaryRef = useRef<string>("");
   const notesRef = useRef<string>("");
+  const transcribingCountRef = useRef<number>(0);
+  const chunkIndexRef = useRef<number>(0);
 
-  // Keep refs in sync for async closures
   useEffect(() => {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
@@ -73,21 +66,15 @@ export function useSessionBackend() {
     notesRef.current = notes;
   }, [notes]);
 
-  /**
-   * Start a new backend session.
-   */
   const startSession = useCallback(
     async (mode: PersistenceMode = "transcript", language: string = "English") => {
       setError(null);
-      const res = await createSession({
-        persistenceMode: mode,
-        language,
-      });
+      const res = await createSession({ persistenceMode: mode, language });
 
       if (res.ok) {
-        const newId = res.data.session_id;
-        sessionIdRef.current = newId;
-        setSessionId(newId);
+        const nextSessionId = res.data.session_id;
+        sessionIdRef.current = nextSessionId;
+        setSessionId(nextSessionId);
         setPersistenceMode(mode);
         setTranscript([]);
         setTranslatedTranscript([]);
@@ -97,22 +84,21 @@ export function useSessionBackend() {
         setKeywords([]);
         setChatHistory([]);
         chunkIndexRef.current = 0;
-        return newId;
-      } else {
-        setError(res.error.message);
-        return null;
+        runningSummaryRef.current = "";
+        notesRef.current = "";
+        return nextSessionId;
       }
+
+      setError(res.error.message);
+      return null;
     },
     [],
   );
 
-  /**
-   * Ensure an active session exists without wiping out existing transcript state
-   */
   const ensureSession = useCallback(
     async (mode: PersistenceMode = "transcript", language: string = "English") => {
       if (sessionIdRef.current) return sessionIdRef.current;
-      
+
       const res = await createSession({ persistenceMode: mode, language });
       if (res.ok) {
         const newId = res.data.session_id;
@@ -126,14 +112,18 @@ export function useSessionBackend() {
     [],
   );
 
-  /**
-   * Process an audio chunk (Blob):
-   * 1. Transcribe via Groq Whisper (/stt-proxy)
-   * 2. Append to rolling live transcript & persist chunk
-   *
-   * Note: Gemini processing (notes, summary, glossary, translation) is omitted
-   * during live recording to ensure low latency and zero quota exhaustion.
-   */
+  const beginTranscribing = useCallback(() => {
+    transcribingCountRef.current += 1;
+    setIsTranscribing(true);
+  }, []);
+
+  const endTranscribing = useCallback(() => {
+    transcribingCountRef.current = Math.max(0, transcribingCountRef.current - 1);
+    if (transcribingCountRef.current === 0) {
+      setIsTranscribing(false);
+    }
+  }, []);
+
   const processAudioChunk = useCallback(
     async (
       audioBlob: Blob,
@@ -141,47 +131,58 @@ export function useSessionBackend() {
       _difficulty: string = "Grade 10",
     ) => {
       if (!audioBlob || audioBlob.size === 0) return;
-      setIsProcessing(true);
+
+      beginTranscribing();
       setError(null);
 
-      // 1. Transcribe audio using Groq Whisper STT
-      const sttRes = await transcribeAudio(audioBlob);
-      if (!sttRes.ok) {
-        setIsProcessing(false);
-        setError(sttRes.error.error);
-        return;
+      try {
+        const sttRes = await transcribeAudio(audioBlob);
+        if (!sttRes.ok) {
+          setError(sttRes.error.error);
+          return;
+        }
+
+        const normalizedTargetLanguage = String(targetLanguage ?? "English").trim() || "English";
+        const newText = sttRes.data.text.trim();
+        if (!newText) return;
+
+        const currentChunkIndex = chunkIndexRef.current++;
+        setTranscript((prev) => [...prev, newText]);
+
+        const procRes = await processTranscript(
+          newText,
+          normalizedTargetLanguage,
+          runningSummaryRef.current,
+          notesRef.current,
+          _difficulty,
+        );
+
+        const translatedLine = procRes.ok && procRes.data.translated_text
+          ? procRes.data.translated_text
+          : newText;
+        setTranslatedTranscript((prev) => [...prev, translatedLine]);
+
+        let currentSessionId = sessionIdRef.current ?? sessionId;
+        if (!currentSessionId) {
+          currentSessionId = await startSession(persistenceMode, targetLanguage);
+        }
+
+        if (currentSessionId) {
+          await saveTranscriptChunk({
+            sessionId: currentSessionId,
+            chunkIndex: currentChunkIndex,
+            text: newText,
+            translatedText: translatedLine,
+            mode: persistenceMode,
+          });
+        }
+      } finally {
+        endTranscribing();
       }
-
-      const newText = sttRes.data.text;
-      if (!newText.trim()) {
-        setIsProcessing(false);
-        return;
-      }
-
-      const currentChunkIndex = chunkIndexRef.current++;
-      setTranscript((prev) => [...prev, newText]);
-
-      const currentSessionId = await ensureSession(persistenceMode, targetLanguage);
-
-      // Save transcript chunk to DB
-      if (currentSessionId) {
-        await saveTranscriptChunk({
-          sessionId: currentSessionId,
-          chunkIndex: currentChunkIndex,
-          text: newText,
-          translatedText: newText,
-          mode: persistenceMode,
-        });
-      }
-
-      setIsProcessing(false);
     },
-    [sessionId, persistenceMode, startSession],
+    [beginTranscribing, endTranscribing, persistenceMode, sessionId, startSession],
   );
 
-  /**
-   * Directly process a raw text segment (for lecture text uploads)
-   */
   const processTextSegment = useCallback(
     async (
       text: string,
@@ -189,26 +190,25 @@ export function useSessionBackend() {
       difficulty: string = "Grade 10",
     ) => {
       if (!text.trim()) return;
+
       setIsProcessing(true);
       setError(null);
 
+      const normalizedTargetLanguage = String(targetLanguage ?? "English").trim() || "English";
       const currentChunkIndex = chunkIndexRef.current++;
       setTranscript((prev) => [...prev, text]);
 
-      const currentSessionId = await ensureSession(persistenceMode, targetLanguage);
-
+      const currentSessionId = await ensureSession(persistenceMode, normalizedTargetLanguage);
       const procRes = await processTranscript(
         text,
-        targetLanguage,
+        normalizedTargetLanguage,
         runningSummaryRef.current,
         notesRef.current,
         difficulty,
       );
 
       if (procRes.ok) {
-        const { translated_text, notes: newNotes, summary, glossary: newGlossary, keywords: newKeywords } = procRes.data;
-
-        const translatedLine = translated_text || text;
+        const translatedLine = procRes.data.translated_text || text;
         setTranslatedTranscript((prev) => [...prev, translatedLine]);
 
         if (currentSessionId) {
@@ -220,69 +220,47 @@ export function useSessionBackend() {
             mode: persistenceMode,
           });
         }
-
-        if (summary) setRunningSummary(summary);
-        if (newNotes) {
-          setNotes((prev) => (prev ? `${prev}\n${newNotes}` : newNotes));
-          if (currentSessionId) {
-            await saveNotes({
-              sessionId: currentSessionId,
-              contentMarkdown: notesRef.current ? `${notesRef.current}\n${newNotes}` : newNotes,
-              mode: persistenceMode,
-            });
-          }
-        }
-
-        if (newGlossary && newGlossary.length > 0) {
-          setGlossary((prev) => {
-            const existingTerms = new Set(prev.map((g) => g.term.toLowerCase()));
-            const uniqueNew = newGlossary.filter((g) => !existingTerms.has(g.term.toLowerCase()));
-            return [...prev, ...uniqueNew];
-          });
-        }
-
-        if (newKeywords && newKeywords.length > 0) {
-          setKeywords((prev) => Array.from(newSetFrom(prev, newKeywords)));
-        }
       } else {
         setTranslatedTranscript((prev) => [...prev, text]);
+        if (currentSessionId) {
+          await saveTranscriptChunk({
+            sessionId: currentSessionId,
+            chunkIndex: currentChunkIndex,
+            text,
+            translatedText: text,
+            mode: persistenceMode,
+          });
+        }
       }
 
       setIsProcessing(false);
     },
-    [persistenceMode, ensureSession],
+    [ensureSession, persistenceMode],
   );
 
-  /**
-   * Handle "I'm Lost" rescue explanation request
-   */
   const handleImLost = useCallback(
     async (currentDifficulty: string = "Grade 10"): Promise<string | null> => {
       const rollingBuffer = transcript.slice(-5).join(" ");
       if (!rollingBuffer) return "No lecture audio has been captured yet to rescue!";
 
       const res = await requestImLostExplanation(rollingBuffer, currentDifficulty);
-
       if (res.ok) {
         return res.data.explanation;
-      } else {
-        setError(res.error.error);
-        return null;
       }
+
+      setError(res.error.error);
+      return null;
     },
     [transcript],
   );
 
-  /**
-   * Send a question to Ask AI (streamed)
-   */
   const sendAskQuestion = useCallback(
     async (question: string): Promise<boolean> => {
       if (!question.trim()) return false;
+
       const activeSessionId = sessionIdRef.current ?? (await ensureSession(persistenceMode));
       if (!activeSessionId) return false;
 
-      // Add user message to chat history
       const userMessage: ChatTurn = { role: "user", content: question };
       setChatHistory((prev) => [...prev, userMessage]);
 
@@ -315,7 +293,6 @@ export function useSessionBackend() {
         return false;
       }
 
-      // Add empty assistant turn to be filled by stream
       setChatHistory((prev) => [...prev, { role: "assistant", content: "" }]);
 
       const reader = result.stream.getReader();
@@ -339,7 +316,6 @@ export function useSessionBackend() {
         });
       }
 
-      // Save complete assistant message to DB
       if (activeSessionId && fullContent) {
         await saveChatMessage({
           sessionId: activeSessionId,
@@ -351,16 +327,7 @@ export function useSessionBackend() {
 
       return true;
     },
-    [
-      persistenceMode,
-      transcript,
-      runningSummary,
-      notes,
-      glossary,
-      keywords,
-      chatHistory,
-      ensureSession,
-    ],
+    [chatHistory, ensureSession, glossary, keywords, notes, persistenceMode, runningSummary, transcript],
   );
 
   return {
@@ -375,6 +342,7 @@ export function useSessionBackend() {
     keywords,
     chatHistory,
     isProcessing,
+    isTranscribing,
     error,
     startSession,
     processAudioChunk,
@@ -382,8 +350,4 @@ export function useSessionBackend() {
     handleImLost,
     sendAskQuestion,
   };
-}
-
-function newSetFrom(existing: string[], incoming: string[]): Set<string> {
-  return new Set([...existing, ...incoming]);
 }

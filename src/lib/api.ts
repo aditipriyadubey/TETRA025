@@ -186,86 +186,48 @@ export async function processTranscript(
   existingNotes: string,
   difficulty: string,
 ): Promise<ApiResult<ProcessResponse>> {
-  // 1. Try Edge Function
+  const currentChunk = transcript.trim();
+  if (!currentChunk) {
+    return {
+      ok: false,
+      error: { error: "Empty transcript chunk.", code: "EMPTY_TRANSCRIPT" },
+    };
+  }
+
+  const transcriptChunk = currentChunk.slice(0, 400);
+
   const edgeRes = await invokeFunction<ProcessResponse>("process", {
-    transcript,
+    transcript: transcriptChunk,
     target_language: targetLanguage,
-    existing_summary: existingSummary,
-    existing_notes: existingNotes,
     difficulty: mapDifficulty(difficulty),
   });
-  if (edgeRes.ok && edgeRes.data.translated_text) return edgeRes;
 
-  // 2. Direct Local Ollama via /ollama-api proxy
-  try {
-    const isHindi = targetLanguage.toLowerCase() === "hindi";
-    const languageInstruction = isHindi
-      ? "IMPORTANT: You MUST translate 'translated_text' into fluent Hindi using Devanagari script (e.g., 'यह मशीन लर्निंग का पाठ है'). Do not return English for translated_text when target language is Hindi!"
-      : `Translate 'translated_text' into ${targetLanguage}.`;
+  if (edgeRes.ok && edgeRes.data.translated_text) {
+    return edgeRes;
+  }
 
-    const prompt = `You are EduBridge AI, an educational companion processing a lecture chunk.
-Transcript: "${transcript}"
-Target Language: ${targetLanguage}
-Difficulty Level: ${difficulty}
-${languageInstruction}
-
-Return ONLY valid JSON (no markdown, no codeblocks) with these keys:
-{
-  "translated_text": "${targetLanguage} translation of the transcript",
-  "notes": "Key structured bullet points for this chunk",
-  "summary": "Updated 1-2 sentence running lecture summary",
-  "glossary": [{"term": "Technical Term", "definition": "Formal definition", "simple_explanation": "Simple real-world analogy"}],
-  "keywords": ["keyword1", "keyword2"]
-}`;
-
-    const ollamaRes = await fetch(`${OLLAMA_BASE}/api/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        prompt,
-        stream: false,
-        format: "json",
-      }),
-    });
-
-    if (ollamaRes.ok) {
-      const json = await ollamaRes.json();
-      const rawText = (json.response ?? "").trim();
-
-      let parsedData: Partial<ProcessResponse> = {};
-      try {
-        parsedData = JSON.parse(rawText);
-      } catch {
-        const bStart = rawText.indexOf("{");
-        const bEnd = rawText.lastIndexOf("}");
-        if (bStart !== -1 && bEnd > bStart) {
-          try {
-            parsedData = JSON.parse(rawText.slice(bStart, bEnd + 1));
-          } catch {
-            // fallback
-          }
-        }
-      }
-
-      return {
-        ok: true,
-        data: {
-          translated_text: parsedData.translated_text || transcript,
-          notes: parsedData.notes || `- ${transcript}`,
-          summary: parsedData.summary || transcript,
-          glossary: Array.isArray(parsedData.glossary) ? parsedData.glossary : [],
-          keywords: Array.isArray(parsedData.keywords) ? parsedData.keywords : [],
-        },
-      };
-    }
-  } catch (err) {
-    console.error("[Process] Local Ollama error:", err);
+  if (targetLanguage.trim().toLowerCase() === "english") {
+    return {
+      ok: true,
+      data: {
+        translated_text: transcriptChunk,
+        notes: "",
+        summary: "",
+        glossary: [],
+        keywords: [],
+      },
+    };
   }
 
   return {
-    ok: false,
-    error: { error: "Local AI processing unavailable.", code: "PROCESS_UNAVAILABLE" },
+    ok: true,
+    data: {
+      translated_text: transcriptChunk,
+      notes: "",
+      summary: "",
+      glossary: [],
+      keywords: [],
+    },
   };
 }
 

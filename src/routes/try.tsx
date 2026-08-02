@@ -51,27 +51,43 @@ function TryNow() {
   const [difficulty, setDifficulty] = useState<Difficulty>("Grade 10");
   const [consentConfirmed, setConsentConfirmed] = useState(false);
 
-  /* Upload state */
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
 
-  /* Recording state */
   const [recordingState, setRecordingState] = useState<RecordingState>("idle");
   const [recordingTime, setRecordingTime] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<number | null>(null);
+  const chunkIntervalRef = useRef<number | null>(null);
+  const recordingStateRef = useRef<RecordingState>("idle");
 
-  /* Active Companion Tab */
   const [activeTab, setActiveTab] = useState<"notes" | "glossary" | "ask">("notes");
 
-  /* AI Session Hook */
   const session = useSessionBackend();
 
-  const chunkIntervalRef = useRef<number | null>(null);
+  const languageRef = useRef(language);
+  const difficultyRef = useRef(difficulty);
+  const processChunkRef = useRef(session.processAudioChunk);
 
-  /* Helper to record standalone valid media chunks for Groq Whisper STT */
+  useEffect(() => {
+    languageRef.current = language;
+  }, [language]);
+
+  useEffect(() => {
+    difficultyRef.current = difficulty;
+  }, [difficulty]);
+
+  useEffect(() => {
+    processChunkRef.current = session.processAudioChunk;
+  }, [session.processAudioChunk]);
+
+  useEffect(() => {
+    recordingStateRef.current = recordingState;
+  }, [recordingState]);
+
   const startSegmentRecorder = useCallback(() => {
-    if (!streamRef.current || !streamRef.current.active) return;
+    if (!streamRef.current?.active) return;
+    if (recordingStateRef.current !== "recording") return;
 
     const types = [
       "audio/webm;codecs=opus",
@@ -96,51 +112,57 @@ function TryNow() {
 
       const chunks: Blob[] = [];
       mr.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
+        if (e.data.size > 0) {
           chunks.push(e.data);
         }
       };
 
-      mr.onstop = async () => {
-        if (chunks.length > 0) {
-          const mime = mr.mimeType || selectedMime || "audio/webm";
-          const validChunkBlob = new Blob(chunks, { type: mime });
-          if (validChunkBlob.size > 500) {
-            await session.processAudioChunk(validChunkBlob, language, difficulty);
-          }
-        }
+      mr.onstop = () => {
+        if (chunks.length === 0) return;
+
+        const mime = mr.mimeType || selectedMime || "audio/webm";
+        const validChunkBlob = new Blob(chunks, { type: mime });
+        if (validChunkBlob.size <= 500) return;
+
+        void processChunkRef.current(
+          validChunkBlob,
+          languageRef.current,
+          difficultyRef.current,
+        );
       };
 
       mr.start();
     } catch (err) {
       console.error("Error starting segment recorder:", err);
     }
-  }, [session, language, difficulty]);
+  }, []);
 
-  /* Start Recording */
   const startRecording = useCallback(async () => {
     try {
-      if (!streamRef.current || !streamRef.current.active) {
+      if (!streamRef.current?.active) {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         streamRef.current = stream;
       }
 
       setRecordingState("recording");
+      recordingStateRef.current = "recording";
       setRecordingTime(0);
 
-      // Begin segment recording
+      void session.startSession("transcript", languageRef.current);
+
       startSegmentRecorder();
 
-      // Cycle segment recorder every 5 seconds to send valid standalone audio chunks
       if (chunkIntervalRef.current) window.clearInterval(chunkIntervalRef.current);
       chunkIntervalRef.current = window.setInterval(() => {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+        if (
+          recordingStateRef.current === "recording" &&
+          mediaRecorderRef.current?.state === "recording"
+        ) {
           mediaRecorderRef.current.stop();
           startSegmentRecorder();
         }
       }, 5000);
 
-      // Increment recording timer
       if (timerRef.current) window.clearInterval(timerRef.current);
       timerRef.current = window.setInterval(() => {
         setRecordingTime((t) => t + 1);
@@ -150,10 +172,11 @@ function TryNow() {
         description: "Please allow microphone access in your browser settings.",
       });
     }
-  }, [startSegmentRecorder]);
+  }, [session, startSegmentRecorder]);
 
-  /* Pause Recording */
   const pauseRecording = useCallback(() => {
+    recordingStateRef.current = "paused";
+
     if (chunkIntervalRef.current) {
       window.clearInterval(chunkIntervalRef.current);
       chunkIntervalRef.current = null;
@@ -163,25 +186,29 @@ function TryNow() {
       timerRef.current = null;
     }
 
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+    if (mediaRecorderRef.current?.state === "recording") {
       mediaRecorderRef.current.stop();
     }
+    mediaRecorderRef.current = null;
 
     setRecordingState("paused");
     toast.info("Recording paused");
   }, []);
 
-  /* Resume Recording */
   const resumeRecording = useCallback(() => {
-    if (!streamRef.current || !streamRef.current.active) return;
+    if (!streamRef.current?.active) return;
 
     setRecordingState("recording");
+    recordingStateRef.current = "recording";
 
     startSegmentRecorder();
 
     if (chunkIntervalRef.current) window.clearInterval(chunkIntervalRef.current);
     chunkIntervalRef.current = window.setInterval(() => {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      if (
+        recordingStateRef.current === "recording" &&
+        mediaRecorderRef.current?.state === "recording"
+      ) {
         mediaRecorderRef.current.stop();
         startSegmentRecorder();
       }
@@ -195,8 +222,9 @@ function TryNow() {
     toast.info("Recording resumed");
   }, [startSegmentRecorder]);
 
-  /* Stop Recording & Finalize Transcript */
   const stopRecording = useCallback(() => {
+    recordingStateRef.current = "idle";
+
     if (chunkIntervalRef.current) {
       window.clearInterval(chunkIntervalRef.current);
       chunkIntervalRef.current = null;
@@ -206,18 +234,18 @@ function TryNow() {
       timerRef.current = null;
     }
 
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+    if (mediaRecorderRef.current?.state !== "inactive") {
       mediaRecorderRef.current.stop();
     }
+    mediaRecorderRef.current = null;
 
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
 
     setRecordingState("idle");
-    toast.success("Recording stopped. Transcript finalized.");
+    toast.success("Recording stopped. Transcript preserved.");
   }, []);
 
-  /* Process Uploaded File */
   const handleFileUpload = useCallback(
     async (file: File) => {
       setUploadedFile(file);
@@ -228,9 +256,8 @@ function TryNow() {
         await session.processTextSegment(text, language, difficulty);
         toast.success("File processed successfully!");
       } else {
-        // Send audio file blob to pipeline
         await session.processAudioChunk(file, language, difficulty);
-        toast.success("Lecture file transcribed & processed!");
+        toast.success("Lecture file transcribed!");
       }
     },
     [session, language, difficulty],
@@ -247,19 +274,21 @@ function TryNow() {
   const formatTime = (s: number) =>
     `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
-  const isLiveSession = mode === "record" && (recordingState === "recording" || recordingState === "paused");
+  const isLiveSession =
+    mode === "record" &&
+    (recordingState === "recording" || recordingState === "paused");
+
+  const showClassroomGrid =
+    mode === "record" || isLiveSession || uploadedFile !== null || session.transcript.length > 0;
 
   return (
     <div className="relative min-h-screen overflow-x-hidden px-4 pt-4 pb-28">
-      {/* Ethical Consent Dialog */}
       <ConsentDialog onConsent={() => setConsentConfirmed(true)} />
 
-      {/* Background */}
       <div className="pointer-events-none fixed inset-0 grid-bg opacity-30 [mask-image:radial-gradient(80%_60%_at_50%_0%,black,transparent)]" />
       <div className="pointer-events-none fixed -top-40 left-1/2 size-[600px] -translate-x-1/2 rounded-full bg-primary/8 blur-[160px]" />
 
       <div className="relative mx-auto max-w-[1400px] space-y-4">
-        {/* Header */}
         <header className="glass flex items-center justify-between rounded-3xl px-5 py-3.5">
           <div className="flex items-center gap-3">
             <Link
@@ -291,24 +320,23 @@ function TryNow() {
                   recordingState === "recording"
                     ? "bg-destructive animate-pulse"
                     : recordingState === "paused"
-                    ? "bg-yellow-500"
-                    : uploadedFile
-                    ? "bg-emerald"
-                    : "bg-muted-foreground/40"
+                      ? "bg-yellow-500"
+                      : uploadedFile
+                        ? "bg-emerald"
+                        : "bg-muted-foreground/40"
                 }`}
               />
               {recordingState === "recording"
                 ? "Live Recording"
                 : recordingState === "paused"
-                ? "Paused"
-                : uploadedFile
-                ? "File Loaded"
-                : "Ready"}
+                  ? "Paused"
+                  : uploadedFile
+                    ? "File Loaded"
+                    : "Ready"}
             </span>
           </div>
         </header>
 
-        {/* TopBar (Language & Difficulty) */}
         <TopBar
           language={language}
           setLanguage={setLanguage}
@@ -316,7 +344,6 @@ function TryNow() {
           setDifficulty={setDifficulty}
         />
 
-        {/* Input Mode Cards (when idle) */}
         {mode === "idle" && !uploadedFile && (
           <div className="animate-rise grid gap-4 md:grid-cols-2">
             <InputCard
@@ -327,9 +354,7 @@ function TryNow() {
               accent="primary"
             />
             <InputCard
-              onClick={() => {
-                setMode("record");
-              }}
+              onClick={() => setMode("record")}
               icon={<Radio className="size-8 text-emerald" strokeWidth={1.4} />}
               title="Record Live Classroom Audio"
               description="Use your microphone during class. Continuous Groq Whisper STT live transcription."
@@ -338,15 +363,10 @@ function TryNow() {
           </div>
         )}
 
-        {/* Upload Zone */}
         {mode === "upload" && !uploadedFile && (
-          <UploadZone
-            onFile={handleFileUpload}
-            onCancel={() => setMode("idle")}
-          />
+          <UploadZone onFile={handleFileUpload} onCancel={() => setMode("idle")} />
         )}
 
-        {/* File Info Bar */}
         {uploadedFile && (
           <div className="animate-rise glass flex items-center justify-between rounded-2xl px-5 py-3">
             <div className="flex items-center gap-3">
@@ -354,7 +374,8 @@ function TryNow() {
               <div>
                 <p className="text-[13px] font-medium">{uploadedFile.name}</p>
                 <p className="font-mono text-[10.5px] text-muted-foreground">
-                  {(uploadedFile.size / (1024 * 1024)).toFixed(2)} MB · {uploadedFile.type || "Audio File"}
+                  {(uploadedFile.size / (1024 * 1024)).toFixed(2)} MB ·{" "}
+                  {uploadedFile.type || "Audio File"}
                 </p>
               </div>
             </div>
@@ -371,23 +392,19 @@ function TryNow() {
           </div>
         )}
 
-        {/* Main Classroom Grid (when recording, file loaded, or transcript exists) */}
-        {(isLiveSession || uploadedFile || session.transcript.length > 0) && (
+        {showClassroomGrid && (
           <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr] min-h-[580px]">
-            {/* Left Column: Side-by-Side Dual Transcript */}
             <div className="h-[580px]">
               <TranscriptDual
                 originalTranscript={session.transcript}
                 translatedTranscript={session.translatedTranscript}
                 targetLanguage={language}
                 isRecording={recordingState === "recording"}
-                isProcessing={session.isProcessing}
+                isProcessing={session.isTranscribing}
               />
             </div>
 
-            {/* Right Column: Tabbed Study Companion */}
             <div className="flex h-[580px] flex-col gap-3">
-              {/* Tab Navigation */}
               <div className="glass flex gap-1 rounded-2xl p-1.5">
                 <button
                   onClick={() => setActiveTab("notes")}
@@ -426,7 +443,6 @@ function TryNow() {
                 </button>
               </div>
 
-              {/* Active Tab Panel */}
               <div className="flex-1 min-h-0">
                 {activeTab === "notes" && (
                   <NotesPanel
@@ -436,10 +452,7 @@ function TryNow() {
                   />
                 )}
                 {activeTab === "glossary" && (
-                  <GlossaryPanel
-                    glossary={session.glossary}
-                    keywords={session.keywords}
-                  />
+                  <GlossaryPanel glossary={session.glossary} keywords={session.keywords} />
                 )}
                 {activeTab === "ask" && (
                   <ChatPanel
@@ -452,7 +465,6 @@ function TryNow() {
           </div>
         )}
 
-        {/* Recording Control Bar */}
         {mode === "record" && (
           <LiveControlBar
             recordingState={recordingState}
@@ -500,7 +512,9 @@ function InputCard({
       />
       <div className="relative">{icon}</div>
       <h3 className="relative text-lg font-medium tracking-tight">{title}</h3>
-      <p className="relative max-w-xs text-[13px] leading-relaxed text-muted-foreground">{description}</p>
+      <p className="relative max-w-xs text-[13px] leading-relaxed text-muted-foreground">
+        {description}
+      </p>
     </button>
   );
 }
@@ -609,8 +623,8 @@ function LiveControlBar({
             isActive
               ? "bg-destructive/15 text-destructive"
               : isPaused
-              ? "bg-yellow-500/15 text-yellow-500"
-              : "bg-foreground text-background hover:-translate-y-0.5"
+                ? "bg-yellow-500/15 text-yellow-500"
+                : "bg-foreground text-background hover:-translate-y-0.5"
           }`}
         >
           {isActive && (
@@ -633,8 +647,8 @@ function LiveControlBar({
             {isActive
               ? `${formatTime(recordingTime)} · streaming live transcript with Groq Whisper STT`
               : isPaused
-              ? `${formatTime(recordingTime)} · paused — transcript preserved`
-              : "Tap Start Recording to begin live classroom transcription"}
+                ? `${formatTime(recordingTime)} · paused — transcript preserved`
+                : "Tap Start Recording to begin live classroom transcription"}
           </p>
         </div>
       </div>
@@ -664,7 +678,7 @@ function LiveControlBar({
               className="inline-flex items-center gap-2 rounded-full border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-[12.5px] font-medium text-destructive transition-all duration-300 hover:border-destructive/50 hover:bg-destructive/20"
             >
               <Square className="size-3.5" />
-              Stop Recording & Generate Notes
+              Stop Recording
             </button>
           </>
         )}
