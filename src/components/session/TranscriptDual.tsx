@@ -117,7 +117,7 @@ export function TranscriptDual({
           <div ref={rightScrollRef} className="overflow-y-auto flex-1 space-y-2.5 pr-1">
             {translatedTranscript.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center text-center p-6 text-muted-foreground/60">
-                <p className="text-xs">Continuous translation will render here in real-time...</p>
+                <p className="text-xs">Translation & AI notes will generate when recording is stopped.</p>
               </div>
             ) : (
               translatedTranscript.map((chunk, index) => (
