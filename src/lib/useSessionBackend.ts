@@ -9,7 +9,7 @@
 //   - "I'm Lost" rescue explanation (/im-lost)
 //   - Streamed Ask AI chat (/ask) grounded in lecture context
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   transcribeAudio,
   processTranscript,
@@ -56,6 +56,22 @@ export function useSessionBackend() {
   const [error, setError] = useState<string | null>(null);
 
   const chunkIndexRef = useRef<number>(0);
+  const sessionIdRef = useRef<string | null>(null);
+  const runningSummaryRef = useRef<string>("");
+  const notesRef = useRef<string>("");
+
+  // Keep refs in sync for async closures
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  useEffect(() => {
+    runningSummaryRef.current = runningSummary;
+  }, [runningSummary]);
+
+  useEffect(() => {
+    notesRef.current = notes;
+  }, [notes]);
 
   /**
    * Start a new backend session.
@@ -69,7 +85,9 @@ export function useSessionBackend() {
       });
 
       if (res.ok) {
-        setSessionId(res.data.session_id);
+        const newId = res.data.session_id;
+        sessionIdRef.current = newId;
+        setSessionId(newId);
         setPersistenceMode(mode);
         setTranscript([]);
         setTranslatedTranscript([]);
@@ -79,11 +97,31 @@ export function useSessionBackend() {
         setKeywords([]);
         setChatHistory([]);
         chunkIndexRef.current = 0;
-        return res.data.session_id;
+        return newId;
       } else {
         setError(res.error.message);
         return null;
       }
+    },
+    [],
+  );
+
+  /**
+   * Ensure an active session exists without wiping out existing transcript state
+   */
+  const ensureSession = useCallback(
+    async (mode: PersistenceMode = "transcript", language: string = "English") => {
+      if (sessionIdRef.current) return sessionIdRef.current;
+      
+      const res = await createSession({ persistenceMode: mode, language });
+      if (res.ok) {
+        const newId = res.data.session_id;
+        sessionIdRef.current = newId;
+        setSessionId(newId);
+        setPersistenceMode(mode);
+        return newId;
+      }
+      return null;
     },
     [],
   );
@@ -123,10 +161,7 @@ export function useSessionBackend() {
       const currentChunkIndex = chunkIndexRef.current++;
       setTranscript((prev) => [...prev, newText]);
 
-      let currentSessionId = sessionId;
-      if (!currentSessionId) {
-        currentSessionId = await startSession(persistenceMode, targetLanguage);
-      }
+      const currentSessionId = await ensureSession(persistenceMode, targetLanguage);
 
       // Save transcript chunk to DB
       if (currentSessionId) {
@@ -160,28 +195,42 @@ export function useSessionBackend() {
       const currentChunkIndex = chunkIndexRef.current++;
       setTranscript((prev) => [...prev, text]);
 
-      let currentSessionId = sessionId;
-      if (!currentSessionId) {
-        currentSessionId = await startSession(persistenceMode, targetLanguage);
-      }
+      const currentSessionId = await ensureSession(persistenceMode, targetLanguage);
 
       const procRes = await processTranscript(
         text,
         targetLanguage,
-        runningSummary,
-        notes,
+        runningSummaryRef.current,
+        notesRef.current,
         difficulty,
       );
 
       if (procRes.ok) {
         const { translated_text, notes: newNotes, summary, glossary: newGlossary, keywords: newKeywords } = procRes.data;
+
         const translatedLine = translated_text || text;
         setTranslatedTranscript((prev) => [...prev, translatedLine]);
 
-        if (summary) setRunningSummary(summary);
+        if (currentSessionId) {
+          await saveTranscriptChunk({
+            sessionId: currentSessionId,
+            chunkIndex: currentChunkIndex,
+            text,
+            translatedText: translatedLine,
+            mode: persistenceMode,
+          });
+        }
 
+        if (summary) setRunningSummary(summary);
         if (newNotes) {
           setNotes((prev) => (prev ? `${prev}\n${newNotes}` : newNotes));
+          if (currentSessionId) {
+            await saveNotes({
+              sessionId: currentSessionId,
+              contentMarkdown: notesRef.current ? `${notesRef.current}\n${newNotes}` : newNotes,
+              mode: persistenceMode,
+            });
+          }
         }
 
         if (newGlossary && newGlossary.length > 0) {
@@ -193,7 +242,7 @@ export function useSessionBackend() {
         }
 
         if (newKeywords && newKeywords.length > 0) {
-          setKeywords((prev) => Array.from(new Set([...prev, ...newKeywords])));
+          setKeywords((prev) => Array.from(newSetFrom(prev, newKeywords)));
         }
       } else {
         setTranslatedTranscript((prev) => [...prev, text]);
@@ -201,93 +250,19 @@ export function useSessionBackend() {
 
       setIsProcessing(false);
     },
-    [sessionId, persistenceMode, runningSummary, notes, startSession],
+    [persistenceMode, ensureSession],
   );
 
   /**
-   * Send a question to Ask AI and stream the lecture-grounded response.
-   */
-  const sendAskQuestion = useCallback(
-    async (
-      question: string,
-      onChunk?: (chunk: string) => void,
-    ): Promise<string | null> => {
-      if (!question.trim()) return null;
-      setError(null);
-
-      const activeSessionId = sessionId ?? crypto.randomUUID();
-      const updatedHistory: ChatTurn[] = [
-        ...chatHistory,
-        { role: "user", content: question },
-      ];
-      setChatHistory(updatedHistory);
-
-      await saveChatMessage({
-        sessionId: activeSessionId,
-        role: "user",
-        content: question,
-        mode: persistenceMode,
-      });
-
-      const rollingBuffer = transcript.slice(-5).join(" ");
-      const glossaryString = glossary.map((g) => `${g.term}: ${g.definition}`).join("\n");
-      const keywordsString = keywords.join(", ");
-
-      const askRes = await askAI(
-        activeSessionId,
-        question,
-        runningSummary,
-        rollingBuffer,
-        chatHistory,
-        notes,
-        glossaryString,
-        keywordsString,
-      );
-
-      if (!askRes.ok) {
-        setError(askRes.error.error);
-        return null;
-      }
-
-      const reader = askRes.stream.getReader();
-      const decoder = new TextDecoder();
-      let fullAnswer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const textChunk = decoder.decode(value, { stream: true });
-        fullAnswer += textChunk;
-        if (onChunk) onChunk(textChunk);
-      }
-
-      const finalHistory: ChatTurn[] = [
-        ...updatedHistory,
-        { role: "assistant", content: fullAnswer },
-      ];
-      setChatHistory(finalHistory);
-
-      await saveChatMessage({
-        sessionId: activeSessionId,
-        role: "assistant",
-        content: fullAnswer,
-        mode: persistenceMode,
-      });
-
-      return fullAnswer;
-    },
-    [sessionId, chatHistory, runningSummary, transcript, notes, glossary, keywords, persistenceMode],
-  );
-
-  /**
-   * Request "I'm Lost" rescue explanation.
+   * Handle "I'm Lost" rescue explanation request
    */
   const handleImLost = useCallback(
-    async (currentDifficulty: string): Promise<string | null> => {
-      setError(null);
+    async (currentDifficulty: string = "Grade 10"): Promise<string | null> => {
       const rollingBuffer = transcript.slice(-5).join(" ");
+      if (!rollingBuffer) return "No lecture audio has been captured yet to rescue!";
 
       const res = await requestImLostExplanation(rollingBuffer, currentDifficulty);
+
       if (res.ok) {
         return res.data.explanation;
       } else {
@@ -296,6 +271,96 @@ export function useSessionBackend() {
       }
     },
     [transcript],
+  );
+
+  /**
+   * Send a question to Ask AI (streamed)
+   */
+  const sendAskQuestion = useCallback(
+    async (question: string): Promise<boolean> => {
+      if (!question.trim()) return false;
+      const activeSessionId = sessionIdRef.current ?? (await ensureSession(persistenceMode));
+      if (!activeSessionId) return false;
+
+      // Add user message to chat history
+      const userMessage: ChatTurn = { role: "user", content: question };
+      setChatHistory((prev) => [...prev, userMessage]);
+
+      if (activeSessionId) {
+        await saveChatMessage({
+          sessionId: activeSessionId,
+          role: "user",
+          content: question,
+          mode: persistenceMode,
+        });
+      }
+
+      const rollingBuffer = transcript.slice(-5).join(" ");
+      const glossaryText = glossary.map((g) => `${g.term}: ${g.definition}`).join("; ");
+      const keywordsText = keywords.join(", ");
+
+      const result = await askAI(
+        activeSessionId,
+        question,
+        runningSummary,
+        rollingBuffer,
+        [...chatHistory, userMessage],
+        notes,
+        glossaryText,
+        keywordsText,
+      );
+
+      if (!result.ok) {
+        setError(result.error.error);
+        return false;
+      }
+
+      // Add empty assistant turn to be filled by stream
+      setChatHistory((prev) => [...prev, { role: "assistant", content: "" }]);
+
+      const reader = result.stream.getReader();
+      const decoder = new TextDecoder();
+      let fullContent = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const text = decoder.decode(value, { stream: true });
+        fullContent += text;
+
+        setChatHistory((prev) => {
+          const updated = [...prev];
+          const lastIndex = updated.length - 1;
+          if (lastIndex >= 0 && updated[lastIndex].role === "assistant") {
+            updated[lastIndex] = { role: "assistant", content: fullContent };
+          }
+          return updated;
+        });
+      }
+
+      // Save complete assistant message to DB
+      if (activeSessionId && fullContent) {
+        await saveChatMessage({
+          sessionId: activeSessionId,
+          role: "assistant",
+          content: fullContent,
+          mode: persistenceMode,
+        });
+      }
+
+      return true;
+    },
+    [
+      persistenceMode,
+      transcript,
+      runningSummary,
+      notes,
+      glossary,
+      keywords,
+      chatHistory,
+      ensureSession,
+    ],
   );
 
   return {
@@ -314,7 +379,11 @@ export function useSessionBackend() {
     startSession,
     processAudioChunk,
     processTextSegment,
-    sendAskQuestion,
     handleImLost,
+    sendAskQuestion,
   };
+}
+
+function newSetFrom(existing: string[], incoming: string[]): Set<string> {
+  return new Set([...existing, ...incoming]);
 }
